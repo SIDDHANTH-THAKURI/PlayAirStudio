@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pose sheet</title>
+<style>
+  body{margin:0;background:#F6EAD8;font:500 12px Inter,system-ui,sans-serif;color:#7A5B3C}
+  .g{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:8px}
+  .c{position:relative;background:#FFFBF2;border-radius:10px;aspect-ratio:1}
+  canvas{position:absolute;inset:0;width:100%;height:100%}
+  span{position:absolute;left:8px;bottom:6px;z-index:2}
+</style></head><body>
+<div class="g" id="g"></div>
+<script type="module">
+import { POSES, pose, landmarks, drawHand, drawWrist } from '../src/hand-art.js';
+const g = document.getElementById('g');
+for (const name of Object.keys(POSES)) {
+  const d = document.createElement('div'); d.className = 'c';
+  d.innerHTML = `<canvas></canvas><span>${name}</span>`;
+  g.appendChild(d);
+  const cv = d.querySelector('canvas');
+  const r = cv.getBoundingClientRect(), dpr = 2;
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const lm = landmarks(pose(name, { x: 0.5, y: 0.52, scale: 0.86 }), r.width, r.height);
+  drawWrist(ctx, lm, '#C0631A', 0.8);
+  drawHand(ctx, lm, { color: '#C0631A', scale: 0.8 });
+}
+window.__ready = 1;
+</script></body></html>

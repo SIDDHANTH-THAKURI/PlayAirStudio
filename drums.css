@@ -1,0 +1,38 @@
+/* drums.css — the few things Air Drums needs on top of the shared theme.
+   Everything structural (topbar, stage, panel, controls, modal) comes from
+   styles.css so the instruments stay recognisably the same product. */
+
+/* Placeholder only — main.js sets the real ratio inline from the camera the
+   moment it reports one. Emphatically NOT `min-height`: with an aspect ratio
+   also in play the browser may satisfy the constraint by growing the *width*,
+   which on a narrow screen pushes the stage clean off the side. */
+.stage { aspect-ratio: 4 / 3; }
+/* Landmarks arrive mirrored, and a mirrored view is the one where moving your
+   hand right moves the stick right. */
+.stage video { transform: scaleX(-1); }
+
+/* The kit is drawn over the video, and a webcam picture is usually busier than
+   a desk. Knocking the feed back a little is what lets brass read as brass. */
+.stage video { filter: saturate(.82) brightness(.94); }
+
+/* ---------- panel bits ---------- */
+.ghost-btn.wide { width: 100%; }
+.np-chord { font-size: 34px; }
+.pill.bad, .pill-quiet.bad { color: var(--rose); }
+.ctl-note .warn { color: var(--rose); font-weight: 600; }
+
+/* The kit legend: which drum is which, without having to squint at the
+   overlay. Colours match the shapes drawn on the stage. */
+.legend { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 10px; margin-top: 2px; }
+.legend span { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink2); }
+.legend i {
+  width: 13px; height: 9px; border-radius: 50%; flex: none;
+  border: 1px solid rgba(44, 33, 24, .28);
+}
+.legend i.skin { background: linear-gradient(160deg, #FFFCF6, #CEBEA8); }
+.legend i.brass { background: linear-gradient(160deg, #F2DC9B, #8C6B22); }
+
+@media (max-width: 720px) {
+  .np-chord { font-size: 28px; }
+  .legend { grid-template-columns: repeat(3, 1fr); }
+}

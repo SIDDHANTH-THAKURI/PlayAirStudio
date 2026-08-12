@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#FBF6EC" />
+<title>Air Drums — sticks that aren't there</title>
+<meta name="description" content="Point your index finger and a drumstick appears along it. Swing at the kit and it plays — how fast you were moving is how hard it lands. Webcam hand tracking, physically modelled drums, entirely client-side." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥁</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css" />
+<link rel="stylesheet" href="./drums.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <a class="brand-back" href="./index.html" aria-label="Back to Air Studio">←</a>
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <g fill="none" stroke-width="1.6">
+          <ellipse cx="20" cy="24" rx="12" ry="5" stroke="#C46A1F"/>
+          <path d="M8 24v5c0 2.8 5.4 5 12 5s12-2.2 12-5v-5" stroke="#8B5E34"/>
+          <ellipse cx="20" cy="24" rx="6.5" ry="2.6" stroke="#E0AC6B"/>
+          <path d="M6 16.5 26 7" stroke="#D9924A" stroke-linecap="round"/>
+          <path d="M34 16.5 14 7" stroke="#D9924A" stroke-linecap="round"/>
+        </g>
+      </svg>
+      <div class="brand-text">
+        <h1>Air&nbsp;Drums</h1>
+        <p class="tagline">Point a finger — the stick is already there</p>
+      </div>
+    </div>
+
+    <div class="pills" role="status" aria-live="polite">
+      <span class="pill" id="pillCam"><i class="dot"></i>camera idle</span>
+      <span class="pill" id="pillHands"><i class="dot"></i>no hands</span>
+      <span class="pill pill-quiet" id="pillPerf">—</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="stage-col">
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div class="veil" id="veil"><div class="veil-card" id="veilCard"></div></div>
+      </div>
+    </section>
+
+    <aside class="panel">
+
+      <div class="nowplaying">
+        <div class="np-label">last hit</div>
+        <div class="np-chord" id="lastHit">—</div>
+        <div class="np-sub" id="lastHitSub">swing at a drum</div>
+      </div>
+
+      <div class="controls">
+
+        <div class="ctl">
+          <div class="legend" aria-hidden="true">
+            <span><i class="brass"></i>Crash</span>
+            <span><i class="brass"></i>Hi-hat</span>
+            <span><i class="skin"></i>Snare</span>
+            <span><i class="skin"></i>Kick</span>
+            <span><i class="skin"></i>Tom</span>
+            <span><i class="skin"></i>Floor</span>
+            <span><i class="brass"></i>Ride</span>
+          </div>
+          <div class="ctl-note">Latency <span id="latNote">—</span></div>
+        </div>
+
+        <div class="ctl" id="camRow" hidden>
+          <label for="selCam">Camera</label>
+          <select id="selCam"></select>
+        </div>
+
+        <div class="ctl">
+          <label>Kit size <span class="lbl-q">how far you reach</span></label>
+          <div class="seg" id="segSize">
+            <button data-v="0.75">Small</button>
+            <button data-v="1">Normal</button>
+            <button data-v="1.25">Wide</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Stick length</label>
+          <div class="seg" id="segReach">
+            <button data-v="1.7">Short</button>
+            <button data-v="2.2">Normal</button>
+            <button data-v="2.8">Long</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Set up for <span class="lbl-q">mirrors the kit</span></label>
+          <div class="seg" id="segHand">
+            <button data-v="right">Right-handed</button>
+            <button data-v="left">Left-handed</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label for="rngRoom">Room <output id="outRoom">22</output></label>
+          <input type="range" id="rngRoom" min="0" max="70" value="22" />
+        </div>
+
+        <div class="ctl">
+          <label for="rngVol">Volume <output id="outVol">80</output></label>
+          <input type="range" id="rngVol" min="0" max="100" value="80" />
+        </div>
+
+        <div class="ctl ctl-row">
+          <label class="switch">
+            <input type="checkbox" id="chkLabels" checked />
+            <span class="track"><span class="knob"></span></span>
+            <span>Name each drum</span>
+          </label>
+        </div>
+
+      </div>
+
+      <button class="ghost-btn" id="helpBtn">How to play</button>
+    </aside>
+
+  </main>
+
+  <footer class="foot">
+    <span>Everything runs in this tab — no video ever leaves your machine.</span>
+    <span class="foot-keys">Every drum is synthesised — nothing is sampled</span>
+  </footer>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card">
+    <button class="modal-x" id="helpClose" aria-label="Close">×</button>
+    <h2>How to play</h2>
+
+    <div class="guide-grid">
+      <div class="guide">
+        <h3>The sticks</h3>
+        <ul>
+          <li><b>Point your index finger and you're holding a stick.</b> Relax your hand and you've put it
+            down — that is the whole control. Resting, gesturing, scratching your nose: all silent, with
+            no special case for any of them.</li>
+          <li>The stick is drawn <b>along the finger you're pointing with</b> and carries on past it, and
+            the <b>tip is what hits</b>. That makes it a lever: a small flick of the wrist swings the tip a
+            long way, so a comfortable movement is plenty. You should not need to swing hard — swinging
+            hard mostly just makes it loud.</li>
+          <li>The drum you're currently aimed at is <b>ringed in your hand's colour</b>, so you can see
+            what you're about to hit before you commit to the stroke.</li>
+          <li>If the sticks feel too long or too short for the space you have, change <b>Stick length</b>.
+            The tip is both what you aim with and what the detection watches, so the two never disagree.</li>
+          <li>Sit back far enough that the camera can see both hands with room to move. There is
+            <b>nothing to calibrate</b> — the kit is already where it needs to be.</li>
+        </ul>
+      </div>
+      <div class="guide">
+        <h3>Playing</h3>
+        <ul>
+          <li><b>Swing at a drum and stop.</b> The hit lands on the stop, which is where a real stick would
+            make its sound, and how fast you were moving when you got there is how hard it lands.</li>
+          <li><b>Harder is brighter, not just louder.</b> A ghost note on the snare and a full backbeat are
+            two different sounds, the way they are on a real kit.</li>
+          <li><b>Both hands are independent</b>, and each is drawn in its own colour so you can see which
+            stick did what.</li>
+          <li><b>Hi-hat:</b> hit the <i>top</i> disc for an open hat, the <i>bottom</i> one for a closed
+            one. Hitting closed slams the open one shut, exactly as the pedal does.</li>
+          <li><b>Ride:</b> the middle is the bell, the outside is the bow — the same as on the real thing.</li>
+          <li>Lift the stick between hits. A stroke needs somewhere to come from, so the stick has to come
+            back up before it can land again, which is how drumming works anyway.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="guide guide-wide">
+      <h3>If hits aren't registering</h3>
+      <ul>
+        <li>Check the <b>track</b> figure in the header. Below about 20 detections a second a stroke can
+          begin and finish between two looks at your hands, and no amount of tuning recovers it. Closing
+          other GPU-heavy tabs and enabling hardware acceleration is the fix.</li>
+        <li><b>Make sure you're actually pointing.</b> If no stick appears, the tracker isn't seeing a
+          point — extend the index finger clearly and let the other three fall in. They don't have to
+          make a fist, but they do have to be out of the way.</li>
+        <li><b>Stop, don't follow through.</b> The detector is looking for a stick being brought up short,
+          not for one travelling fast. A long lazy sweep across the kit is deliberately silent, which is
+          what lets you move between drums without playing every one on the way.</li>
+        <li>If you're reaching uncomfortably far for anything, try a smaller <b>Kit size</b>. The stick
+          tip hangs below your hand, so the kit sits lower in the frame than a photo of a kit would —
+          that is deliberate, and it is what makes the top row reachable at all.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./src/gate.js"></script>
+<script type="module" src="./src/drums/main.js"></script>
+</body>
+</html>

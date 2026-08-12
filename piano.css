@@ -1,0 +1,46 @@
+/* piano.css — the few things Air Piano needs on top of the shared theme.
+   Everything structural (topbar, stage, panel, controls, modal) comes from
+   styles.css so the two instruments stay recognisably the same product. */
+
+/* The stage is a desk seen at an angle, so it is rarely 16:9 — main.js sets the
+   real ratio inline from the camera the moment it reports one. This is only a
+   placeholder so the box doesn't collapse to nothing before then.
+
+   Emphatically NOT `min-height`: with an aspect ratio also in play the browser
+   is free to satisfy the constraint by growing the *width* instead, and on a
+   narrow screen that pushes the stage clean off the side of the viewport. */
+.stage { aspect-ratio: 4 / 3; }
+/* Landmarks arrive mirrored, and a mirrored view is the one where moving your
+   hand right moves the marker right. */
+.stage video { transform: scaleX(-1); }
+.stage.picking { cursor: crosshair; }
+.stage.picking canvas { pointer-events: none; }
+
+/* ---------- calibration bar ---------- */
+.calbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  margin-top: 12px; padding: 11px 14px;
+  background: var(--card); border: 1px solid rgba(192, 99, 26, .34); border-radius: var(--r);
+  box-shadow: var(--sh-s);
+}
+.calbar[hidden] { display: none; }
+.cal-hint { font-size: 13px; color: var(--ink2); }
+.cal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.cal-actions .btn { padding: 9px 16px; font-size: 13px; }
+
+/* ---------- panel bits ---------- */
+.ghost-btn.wide { width: 100%; }
+.ghost-btn.on { background: linear-gradient(180deg, #FFF3DE, #FDE7C6); border-style: solid; border-color: rgba(192, 99, 26, .45); color: var(--amber-d); }
+.np-chord { font-size: 40px; }
+.pill.bad, .pill-quiet.bad { color: var(--rose); }
+
+@media (max-width: 720px) {
+  .calbar { flex-direction: column; align-items: stretch; }
+  .cal-actions { justify-content: stretch; }
+  .cal-actions .btn { flex: 1; }
+  .np-chord { font-size: 34px; }
+}
+
+/* Inline caution inside a panel note, e.g. the latency readout pointing at a
+   CPU-only tracker — the one setting that matters most for how this feels. */
+.ctl-note .warn { color: var(--rose); font-weight: 600; }

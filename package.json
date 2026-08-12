@@ -1,0 +1,11 @@
+{
+  "name": "air-guitar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Webcam air guitar: MediaPipe hand tracking + Tone.js string synthesis, entirely client-side.",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes serve . -l 8000",
+    "dev": "npx --yes serve . -l 8000"
+  }
+}

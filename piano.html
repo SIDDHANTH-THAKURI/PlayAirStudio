@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#FBF6EC" />
+<title>Air Piano — a keyboard that isn't there</title>
+<meta name="description" content="Mark out a keyboard in the air, or on your desk, and play it. Tap where the keys are; how hard you strike is how loud it sounds. Webcam hand tracking, modal string synthesis, entirely client-side." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎹</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css" />
+<link rel="stylesheet" href="./piano.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <a class="brand-back" href="./index.html" aria-label="Back to Air Studio">←</a>
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <g>
+          <rect x="5" y="9" width="6" height="22" rx="1.5" fill="none" stroke="#C46A1F" stroke-width="1.6"/>
+          <rect x="12" y="9" width="6" height="22" rx="1.5" fill="none" stroke="#D9924A" stroke-width="1.6"/>
+          <rect x="19" y="9" width="6" height="22" rx="1.5" fill="none" stroke="#E0AC6B" stroke-width="1.6"/>
+          <rect x="26" y="9" width="6" height="22" rx="1.5" fill="none" stroke="#E7C094" stroke-width="1.6"/>
+          <rect x="9" y="9" width="4" height="13" rx="1" fill="#8B5E34"/>
+          <rect x="23" y="9" width="4" height="13" rx="1" fill="#8B5E34"/>
+        </g>
+      </svg>
+      <div class="brand-text">
+        <h1>Air&nbsp;Piano</h1>
+        <p class="tagline">Mark out a keyboard in the air — or on your desk</p>
+      </div>
+    </div>
+
+    <div class="pills" role="status" aria-live="polite">
+      <span class="pill" id="pillCam"><i class="dot"></i>camera idle</span>
+      <span class="pill" id="pillHands"><i class="dot"></i>no hands</span>
+      <span class="pill pill-quiet" id="pillPerf">—</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="stage-col">
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div class="veil" id="veil"><div class="veil-card" id="veilCard"></div></div>
+      </div>
+
+      <!-- Only visible while marking out the desk. -->
+      <div class="calbar" id="calBar" hidden>
+        <span class="cal-hint" id="calHint">Tap the four corners of the area you want to play on.</span>
+        <div class="cal-actions">
+          <button class="btn sec" id="calReset">Reset</button>
+          <button class="btn sec" id="calCancel">Cancel</button>
+          <button class="btn" id="calUse" disabled>Use this area</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel">
+
+      <div class="nowplaying">
+        <div class="np-label">last note</div>
+        <div class="np-chord" id="lastNote">—</div>
+        <div class="np-sub" id="lastNoteSub">tap the desk</div>
+      </div>
+
+      <div class="controls">
+
+        <div class="ctl">
+          <button class="ghost-btn wide" id="calBtn">Mark out my desk…</button>
+          <div class="ctl-note">Range <span id="rangeNote">—</span></div>
+          <div class="ctl-note">Latency <span id="latNote">—</span></div>
+        </div>
+
+        <div class="ctl" id="camRow" hidden>
+          <label for="selCam">Camera</label>
+          <select id="selCam"></select>
+        </div>
+
+        <div class="ctl">
+          <label for="selKey">Key</label>
+          <select id="selKey"></select>
+        </div>
+
+        <div class="ctl">
+          <label for="selScale">Scale</label>
+          <select id="selScale"></select>
+        </div>
+
+        <div class="ctl">
+          <label>Play against</label>
+          <div class="seg" id="segSurface">
+            <button data-v="air">Air</button>
+            <button data-v="desk">Desk</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Keys across</label>
+          <div class="seg" id="segCols">
+            <button data-v="6">6</button>
+            <button data-v="8">8</button>
+            <button data-v="10">10</button>
+            <button data-v="12">12</button>
+            <button data-v="15">15</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Rows <span class="lbl-q">one is easiest</span></label>
+          <div class="seg" id="segRows">
+            <button data-v="1">1</button>
+            <button data-v="2">2</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Bottom octave</label>
+          <div class="seg" id="segOct">
+            <button data-v="3">3</button>
+            <button data-v="4">4</button>
+            <button data-v="5">5</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Left hand <span class="lbl-q">register</span></label>
+          <div class="seg" id="segSplit">
+            <button data-v="yes">Bass</button>
+            <button data-v="no">Same</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Damping <span class="lbl-q">note length</span></label>
+          <div class="seg" id="segDamp">
+            <button data-v="pedal">Pedal</button>
+            <button data-v="finger">Follow finger</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label for="rngSus">Sustain <output id="outSus">55</output></label>
+          <input type="range" id="rngSus" min="0" max="100" value="55" />
+        </div>
+
+        <div class="ctl">
+          <label for="rngTone">Lid <span class="lbl-q">brightness</span> <output id="outTone">50</output></label>
+          <input type="range" id="rngTone" min="0" max="100" value="50" />
+        </div>
+
+        <div class="ctl">
+          <label for="rngRoom">Room <output id="outRoom">18</output></label>
+          <input type="range" id="rngRoom" min="0" max="70" value="18" />
+        </div>
+
+        <div class="ctl">
+          <label for="rngVol">Volume <output id="outVol">80</output></label>
+          <input type="range" id="rngVol" min="0" max="100" value="80" />
+        </div>
+
+        <div class="ctl ctl-row">
+          <label class="switch">
+            <input type="checkbox" id="chkNames" checked />
+            <span class="track"><span class="knob"></span></span>
+            <span>Show every note name</span>
+          </label>
+        </div>
+
+      </div>
+
+      <button class="ghost-btn" id="helpBtn">How to play</button>
+    </aside>
+
+  </main>
+
+  <footer class="foot">
+    <span>Everything runs in this tab — no video ever leaves your machine.</span>
+    <span class="foot-keys">Prototype · tap detection is the interesting part</span>
+  </footer>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card">
+    <button class="modal-x" id="helpClose" aria-label="Close">×</button>
+    <h2>How to play</h2>
+
+    <div class="guide-grid">
+      <div class="guide">
+        <h3>Setting up</h3>
+        <ul>
+          <li><b>Air is the easy way in</b>, and the default. Leave your screen where it is, mark out a
+            keyboard-sized rectangle in the air in front of you, and play that. Nothing to reposition, and
+            you can still see the screen — which you cannot if the lid is tilted down at the desk.</li>
+          <li><b>Desk</b> gives you a real surface to feel, which is steadier once you are used to it.
+            Tilt the screen down until the camera sees the desk and your hands resting on it; a lid at
+            roughly 45° is the sweet spot. It reads a tap by watching your fingertip travel and then stop,
+            so it wants to see that travel: almost edge-on and directly overhead both give it less to work
+            with.</li>
+          <li>Switching between the two re-opens calibration, because the plane you marked in the air is
+            not the one on your desk.</li>
+          <li><b>Mark out your playing area</b> by <b>tapping</b> its four corners — far-left, far-right,
+            near-right, near-left. Tap them, don't click them: the calibration has to be built from the same
+            kind of point the instrument later measures, and a fingertip resting on the desk sits a
+            centimetre or two above the desk's own surface. Marking the surface but playing with your
+            fingertips puts every key out by up to two whole keys on a low camera. Clicking still works if
+            tracking won't cooperate, and you can click any corner afterwards to nudge it.</li>
+          <li>Calibration is remembered. Redo it if you move the camera, change camera, or move the desk.</li>
+          <li>Using an external webcam? Pick it from the <b>Camera</b> list — a desk rig usually isn't the
+            built-in one, and changing camera means re-marking the desk.</li>
+        </ul>
+      </div>
+      <div class="guide">
+        <h3>Playing</h3>
+        <ul>
+          <li><b>Tap the desk like keys</b>, with your fingers. Notes fire the moment your fingertip stops
+            against the surface — the same instant a real key would sound. A note needs the finger to reach
+            for the desk; dropping your whole hand rigidly is treated as putting your hands down, not as
+            playing, which is what keeps resting between phrases silent.</li>
+          <li><b>How hard you strike is how loud it is</b>, and harder notes are brighter as well as louder,
+            the way a real hammer excites more of the string.</li>
+          <li><b>Both hands play independently.</b> With the register split on, your left hand sounds two
+            octaves down, so the whole surface is a bass keyboard for it and a treble one for your right.</li>
+          <li>Resting your hands on the desk is silent — only a genuine strike speaks, and a hand simply put
+            down flat has no reach of its own, so you can leave your hands down between phrases.</li>
+          <li><b>Damping</b> decides how long notes last. <i>Pedal</i> lets every note ring out like a piano
+            with the sustain pedal down. <i>Follow finger</i> drops the damper when you lift off, so how long
+            you leave the finger down is how long the note lasts — which is what makes staccato playable.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="guide guide-wide">
+      <h3>If taps aren't registering</h3>
+      <ul>
+        <li>Check the <b>track</b> figure in the header. Below about 20 detections a second a tap can begin
+          and end between two looks at your hands, and no amount of tuning recovers it. Closing other
+          GPU-heavy tabs and enabling hardware acceleration is the fix.</li>
+        <li><b>Strike, don't press.</b> The detector is looking for a finger being stopped by the surface,
+          not for a finger arriving at it. A slow deliberate press is deliberately silent — that is what
+          lets you rest your hands down.</li>
+        <li>Keep your fingers reasonably <b>extended</b>. A curled finger is ignored, which is what stops a
+          fist or a wrist landing from playing a cluster.</li>
+        <li>If the keys look like they're in the wrong place, the calibration has drifted — mark the desk
+          out again.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./src/gate.js"></script>
+<script type="module" src="./src/piano/main.js"></script>
+</body>
+</html>

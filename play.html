@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#FBF6EC" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>Air Guitar — an instrument you play with your hands</title>
+<meta name="description" content="A browser air guitar: point at a wall of chords, hold a sign to run a strum pattern, or pick single strings by finger count. Webcam hand tracking, Karplus-Strong synthesis, entirely client-side." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎸</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<!-- Portrait phones only: both hands need a wide frame. CSS decides when this
+     shows, so rotating the device dismisses it without any JS. -->
+<div class="rotate" id="rotate">
+  <div class="rotate-card">
+    <div class="rotate-phone" aria-hidden="true"><span></span></div>
+    <h2>Turn your phone sideways</h2>
+    <p>Air&nbsp;Guitar puts the chord wall beside the strings, and both your hands
+       have to fit in the frame. Landscape gives them room.</p>
+    <div class="veil-actions">
+      <button class="btn" id="rotateGo">Go fullscreen</button>
+      <button class="btn sec" id="rotateSkip">Stay in portrait</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <a class="brand-back" href="./index.html" aria-label="Back to Air Studio">←</a>
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <g stroke-linecap="round">
+          <path d="M6 9 C 16 9, 26 12, 34 14" stroke="#C46A1F" stroke-width="2.4"/>
+          <path d="M6 15 C 16 15, 26 17, 34 18" stroke="#D9924A" stroke-width="1.9"/>
+          <path d="M6 21 C 16 21, 26 22, 34 22" stroke="#E0AC6B" stroke-width="1.4"/>
+          <path d="M6 27 C 16 27, 26 27, 34 26" stroke="#E7C094" stroke-width="1"/>
+        </g>
+      </svg>
+      <div class="brand-text">
+        <h1>Air&nbsp;Guitar</h1>
+        <p class="tagline">Point for chords · signs for patterns · fingers for strings</p>
+      </div>
+    </div>
+
+    <div class="pills" role="status" aria-live="polite">
+      <span class="pill" id="pillCam"><i class="dot"></i>camera idle</span>
+      <span class="pill" id="pillHands"><i class="dot"></i>no hands</span>
+      <span class="pill pill-quiet" id="pillPerf">—</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="stage-col">
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+
+        <!-- Floating coach card: fades out after the player's first few notes -->
+        <div class="coach" id="coach" hidden>
+          <div class="coach-row"><span class="coach-key">◀ point</span> index finger at a chord cell</div>
+          <div class="coach-row"><span class="coach-key">sign ▶</span> hold ✊ ✌️ 🤘 🤙 👌 for a pattern · ✋ stops</div>
+          <div class="coach-row"><span class="coach-key">👍 1 s</span> opens that hand's mode dial</div>
+        </div>
+
+        <!-- Veil covers the stage for start / loading / error states -->
+        <div class="veil" id="veil">
+          <div class="veil-card" id="veilCard"></div>
+        </div>
+      </div>
+
+      <div class="chordstrip" id="chordstrip" aria-label="Chord bank"></div>
+    </section>
+
+    <aside class="panel">
+
+      <div class="nowplaying" id="nowPlaying">
+        <div class="np-label">now fretting</div>
+        <div class="np-chord" id="chordName">—</div>
+        <div class="np-sub" id="chordSub">waiting for your hands</div>
+        <div class="np-diagram" id="diagram"></div>
+      </div>
+
+      <div class="meters">
+        <div class="meter">
+          <div class="meter-head"><span>left hand</span><span id="lhState">chord grid</span></div>
+        </div>
+        <div class="meter">
+          <div class="meter-head"><span>right hand</span><span id="rhState">—</span></div>
+          <div class="bar"><i id="dwellBar"></i></div>
+        </div>
+        <div class="slotlist" id="slotlist" aria-label="Right hand legend"></div>
+        <!-- Touch transport: the keyboard's strums, for devices without one. -->
+        <div class="touchbar" aria-label="Touch controls">
+          <button id="tapDown" type="button"><span class="tb-g">↓</span>strum</button>
+          <button id="tapUp" type="button"><span class="tb-g">↑</span>strum</button>
+          <button id="tapDead" type="button"><span class="tb-g">✋</span>mute</button>
+        </div>
+        <div class="badges">
+          <span class="badge" id="badgeStroke">·</span>
+          <span class="badge" id="badgeMute">open</span>
+          <span class="badge" id="badgeExpr">·</span>
+        </div>
+      </div>
+
+      <div class="controls">
+
+        <div class="ctl">
+          <label>Left hand <span class="lbl-q">chords</span></label>
+          <div class="seg" id="segChordMode">
+            <button data-v="grid" class="on">Chord grid</button>
+            <button data-v="signs">Sign chords</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Right hand <span class="lbl-q">strings</span></label>
+          <div class="seg" id="segPlayMode">
+            <button data-v="finger">Fingerstyle</button>
+            <button data-v="strum" class="on">Strumming</button>
+          </div>
+        </div>
+
+        <div class="ctl ctl-btns">
+          <button class="ghost-btn" id="bankBtn">Chord bank…</button>
+          <button class="ghost-btn" id="patBtn">Strum maker…</button>
+        </div>
+
+        <div class="ctl">
+          <label for="selKey">Key</label>
+          <select id="selKey"></select>
+        </div>
+
+        <div class="ctl">
+          <label for="selStyle">Voicing set</label>
+          <select id="selStyle"></select>
+        </div>
+
+        <div class="ctl">
+          <label>Sound</label>
+          <div class="seg" id="segTone">
+            <button data-v="acoustic" class="on">Acoustic</button>
+            <button data-v="electric">Electric</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Shapes</label>
+          <div class="seg" id="segVoicing">
+            <button data-v="open" class="on">Open</button>
+            <button data-v="power">Power</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label>Handedness</label>
+          <div class="seg" id="segHand">
+            <button data-v="right" class="on">Right</button>
+            <button data-v="left">Left</button>
+          </div>
+        </div>
+
+        <div class="ctl">
+          <label for="rngVol">Volume <output id="outVol">80</output></label>
+          <input type="range" id="rngVol" min="0" max="100" value="80" />
+        </div>
+
+        <div class="ctl">
+          <label for="rngRev">Room <output id="outRev">20</output></label>
+          <input type="range" id="rngRev" min="0" max="70" value="20" />
+        </div>
+
+        <div class="ctl">
+          <label for="rngBpm">Tempo <span class="lbl-q">strum speed</span> <output id="outBpm">96</output></label>
+          <input type="range" id="rngBpm" min="40" max="240" value="96" />
+          <div class="ctl-note" id="rateNote">—</div>
+        </div>
+
+        <div class="ctl ctl-row">
+          <label class="switch">
+            <input type="checkbox" id="chkMetro" />
+            <span class="track"><span class="knob"></span></span>
+            <span>Metronome</span>
+          </label>
+        </div>
+
+      </div>
+
+      <button class="ghost-btn" id="tourBtn">Take the tour</button>
+      <button class="ghost-btn" id="helpBtn">Gesture guide</button>
+    </aside>
+
+  </main>
+
+  <footer class="foot">
+    <span>Everything runs in this tab — no video ever leaves your machine.</span>
+    <span class="foot-keys kb-only"><kbd>1</kbd>–<kbd>=</kbd> chords · <kbd>Q</kbd>–<kbd>Y</kbd> strings · <kbd>Z</kbd>–<kbd>B</kbd> patterns</span>
+  </footer>
+</div>
+
+<!-- Chord bank editor -->
+<div class="modal" id="bankModal" hidden>
+  <div class="modal-card">
+    <button class="modal-x" id="bankClose" aria-label="Close">×</button>
+    <h2>Chord bank</h2>
+    <div id="bankBody"></div>
+  </div>
+</div>
+
+<!-- Strum maker -->
+<div class="modal" id="patModal" hidden>
+  <div class="modal-card wide">
+    <button class="modal-x" id="patClose" aria-label="Close">×</button>
+    <h2>Strum maker</h2>
+    <div class="pat-grid">
+      <div class="pat-col"><h3>Patterns</h3><div id="patList" class="pat-list"></div></div>
+      <div class="pat-col"><div id="patEdit"></div></div>
+    </div>
+    <div id="patBind" class="pat-bind"></div>
+  </div>
+</div>
+
+<!-- Gesture guide modal -->
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card">
+    <button class="modal-x" id="helpClose" aria-label="Close">×</button>
+    <h2>How to play</h2>
+
+    <div class="guide-grid">
+      <div class="guide">
+        <h3>Fretting hand <em>(chords side of the frame)</em></h3>
+        <ul>
+          <li><b>Chord grid</b> — your <b>index fingertip</b> is the cursor. A cell only takes over while you're
+            actually <b>pointing</b> (☝️ index out, other fingers in), so drifting across the wall with a relaxed
+            hand changes nothing.</li>
+          <li><b>Sign chords</b> — five chords bound to ✋ ✌️ 🤘 👌 🤙. Where your hand is stops mattering entirely.</li>
+          <li><b>Deaden</b>: ✌️ index + middle in grid mode, ✊ fist in sign mode — plucks turn into percussive <i>chk</i>s.</li>
+          <li><b>Vibrato</b>: 🤘 index + little finger, then shake up and down. In sign mode just shake — nothing
+            else is listening to your position.</li>
+          <li><b>Bend</b>: pinch thumb + index (middle finger out) for up to a whole step. <em>Chord-grid mode only</em> —
+            in sign mode that exact hand is 👌, so it picks a chord instead.</li>
+        </ul>
+      </div>
+      <div class="guide">
+        <h3>Plucking hand <em>(no fast moves needed)</em></h3>
+        <ul>
+          <li><b>Fingerstyle</b> — the number of open digits picks one string:
+            1 → 1st (high e), 2 → 2nd (B), 3 → 3rd (G), 4 → 4th (D), 5 → 5th (A),
+            <b>little finger alone</b> → 6th (low E). Each shape sounds once; go back toward a fist,
+            or move to a different count, to fire again.</li>
+          <li><b>Strumming</b> — hold ✊ ✌️ 🤘 🤙 👌 for about half a second to run that sign's pattern for as long as
+            you hold it. <b>✋ open palm stops.</b> Patterns pick up chord changes live.</li>
+          <li><b>Too slow?</b> The <b>Tempo</b> slider (or <kbd>[</kbd> <kbd>]</kbd>) moves the whole song, live and
+            without stuttering. To speed up just <i>one</i> pattern, set its <b>feel</b> to 1½× or 2× in the strum
+            maker — the song stays put and that strum gets busier.</li>
+          <li><b>Move toward the edge of frame</b> to brighten the tone (bridge pickup); toward the middle for warmth.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="guide guide-wide">
+      <h3>Switching modes <em>(same ritual on both hands)</em></h3>
+      <ul>
+        <li>Hold <b>👍 thumbs-up for one second</b> — a two-option dial opens around that hand.</li>
+        <li><b>Tilt the hand left or right</b> to move the highlight.</li>
+        <li><b>Open your palm</b> to accept. Drop the shape and the dial closes without changing anything.</li>
+        <li>The left hand's dial switches <b>chord grid ⇄ sign chords</b>; the right hand's switches
+          <b>fingerstyle ⇄ strumming</b>. Both are also plain buttons in the panel.</li>
+      </ul>
+    </div>
+
+    <p class="guide-note">Keyboard: <kbd>1</kbd>–<kbd>=</kbd> pick a chord cell, <kbd>,</kbd><kbd>.</kbd> step through them,
+      <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd><kbd>R</kbd><kbd>T</kbd><kbd>Y</kbd> pluck strings 1→6,
+      <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd><kbd>V</kbd><kbd>B</kbd> toggle the five sign patterns,
+      <kbd>↓</kbd> / <kbd>Space</kbd> downstroke, <kbd>↑</kbd> upstroke, <kbd>Shift</kbd> accents,
+      <kbd>[</kbd> <kbd>]</kbd> tempo, <kbd>G</kbd> / <kbd>F</kbd> flip the two modes,
+      <kbd>M</kbd> palm mute, <kbd>N</kbd> dead notes.</p>
+  </div>
+</div>
+
+<script type="module" src="./src/gate.js"></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

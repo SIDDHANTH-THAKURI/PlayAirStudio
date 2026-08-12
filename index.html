@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#FBF6EC" />
+<title>Air Studio — instruments you play with your hands</title>
+<meta name="description" content="Instruments you play with your hands and a webcam. Guitar, piano and drums, all playable now. Everything runs in your browser — no uploads, no recording." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎸</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./intro.css" />
+</head>
+<body>
+
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+<div class="wash-layer" aria-hidden="true"></div>
+
+<!-- Unsolicited music needs an off switch, and it has to be findable. -->
+<button class="sound" id="sound" aria-pressed="true" aria-label="Toggle sound">
+  <span class="sound-on" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4z" fill="currentColor"/>
+      <path d="M15.6 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </span>
+  <span class="sound-off" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4z" fill="currentColor"/>
+      <path d="M16 9.5l5 5m0-5l-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </span>
+</button>
+
+<!-- ============ scene 1: hero ============ -->
+<section class="scene on" id="hero">
+  <div class="hero-inner">
+    <div class="eyebrow"><span class="dot"></span>runs entirely in your browser</div>
+
+    <h1 class="title">
+      <span class="w"><span class="l" style="--i:0">A</span><span class="l" style="--i:1">i</span><span class="l" style="--i:2">r</span></span>
+      <span class="w"><span class="l" style="--i:3">S</span><span class="l" style="--i:4">t</span><span class="l" style="--i:5">u</span><span class="l" style="--i:6">d</span><span class="l" style="--i:7">i</span><span class="l" style="--i:8">o</span></span>
+    </h1>
+
+    <p class="lede">Instruments you play with your hands.<br />
+      A webcam watches, and nothing ever leaves this tab.</p>
+
+    <button class="enter" id="enter">
+      <span class="enter-label">Enter the studio</span>
+      <span class="enter-arrow" aria-hidden="true">→</span>
+    </button>
+
+    <p class="hint">Drag across the strings.</p>
+  </div>
+</section>
+
+<!-- ============ scene 2: app shelf ============ -->
+<section class="scene" id="shelf" aria-hidden="true">
+  <div class="shelf-inner">
+    <header class="shelf-head">
+      <a class="back" href="#" aria-label="Back">←</a>
+      <div>
+        <h2>The studio</h2>
+        <p>Three are playable. More are being built.</p>
+      </div>
+    </header>
+
+    <div class="cards">
+
+      <a class="card live" href="./play.html" data-note="5" style="--d:0">
+        <div class="card-art art-guitar" aria-hidden="true">
+          <span class="s"></span><span class="s"></span><span class="s"></span>
+          <span class="s"></span><span class="s"></span><span class="s"></span>
+        </div>
+        <div class="card-body">
+          <div class="card-top">
+            <h3>Air Guitar</h3>
+            <span class="tag tag-live">ready</span>
+          </div>
+          <p>Point at a wall of chords with one hand. Hold a sign to run a strum
+             pattern, or pick single strings by how many fingers you open.</p>
+          <span class="card-go">Play it <em>→</em></span>
+        </div>
+      </a>
+
+      <a class="card live" href="./piano.html" style="--d:1">
+        <div class="card-art art-piano" aria-hidden="true">
+          <span class="k"></span><span class="k b"></span><span class="k"></span><span class="k b"></span>
+          <span class="k"></span><span class="k"></span><span class="k b"></span><span class="k"></span>
+        </div>
+        <div class="card-body">
+          <div class="card-top">
+            <h3>Air Piano</h3>
+            <span class="tag tag-proto">prototype</span>
+          </div>
+          <p>Point the camera down at your desk and the desk is the keyboard. Tap
+             it like keys — how hard you strike is how loud the note is.</p>
+          <span class="card-go">Play it <em>→</em></span>
+        </div>
+      </a>
+
+      <a class="card live" href="./drums.html" style="--d:2">
+        <div class="card-art art-drums" aria-hidden="true">
+          <span class="p"></span><span class="p"></span><span class="p"></span>
+        </div>
+        <div class="card-body">
+          <div class="card-top">
+            <h3>Air Drums</h3>
+            <span class="tag tag-proto">prototype</span>
+          </div>
+          <p>Close your hands and you're holding a pair of sticks. Swing at the
+             kit and stop — the stop is the hit, and how fast you were going is
+             how hard it lands.</p>
+          <span class="card-go">Play it <em>→</em></span>
+        </div>
+      </a>
+
+    </div>
+
+    <p class="shelf-foot">No account, no upload, no recording. Your camera feed
+      is read in the page and thrown away frame by frame.</p>
+  </div>
+</section>
+
+<script type="module" src="./src/gate.js"></script>
+<script type="module" src="./src/intro.js"></script>
+</body>
+</html>

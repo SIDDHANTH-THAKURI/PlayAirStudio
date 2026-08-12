@@ -1,0 +1,237 @@
+/* intro.css — the front door. Same warm palette as the instrument, but given
+   room to breathe: one column, big type, and the string field doing the work. */
+:root{
+  --bg:#FBF6EC; --bg2:#F1E5D3; --card:#FFFCF6; --ink:#2C2118; --ink2:#6E5C49; --ink3:#9B8974;
+  --amber:#E0932F; --amber-d:#C0631A; --wood:#A8703F; --sage:#5E8C6A; --rose:#D2604F;
+  --line:rgba(44,33,24,.10); --line2:rgba(44,33,24,.18);
+  --sh-m:0 2px 6px rgba(80,55,30,.08), 0 18px 40px -14px rgba(90,60,25,.26);
+  --sh-l:0 30px 70px -26px rgba(90,60,25,.42);
+  --ui:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --disp:'Fraunces',Georgia,'Times New Roman',serif;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;font-family:var(--ui);color:var(--ink);-webkit-font-smoothing:antialiased;overflow:hidden;
+  background:
+    radial-gradient(1200px 700px at 14% -10%, #FFF7E7 0%, transparent 60%),
+    radial-gradient(1000px 620px at 92% 4%, #FCEBD6 0%, transparent 56%),
+    radial-gradient(900px 700px at 50% 115%, #F6E3C9 0%, transparent 60%),
+    linear-gradient(180deg,var(--bg) 0%, var(--bg2) 100%);
+}
+
+/* ---------- the string field ---------- */
+#bg{position:fixed;inset:0;z-index:0;pointer-events:none}
+/* Faint paper tooth: kills the flatness of pure CSS gradients on big screens. */
+.grain{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.4;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.09'/%3E%3C/svg%3E")}
+
+/* Amber flash used when a strum fires and when we navigate away. */
+.wash-layer{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:0;
+  background:radial-gradient(120% 90% at 50% 50%, rgba(255,236,199,.95), rgba(224,147,47,.75) 55%, rgba(192,99,26,.9));
+  transition:opacity .5s var(--ease)}
+body.wash .wash-layer{opacity:.32;transition:opacity .12s ease-out}
+body.leaving .wash-layer{opacity:1;transition:opacity .5s var(--ease)}
+
+/* ---------- scenes ---------- */
+.scene{position:fixed;inset:0;z-index:2;display:grid;place-items:center;padding:32px 24px;
+  opacity:0;visibility:hidden;transform:translateY(14px) scale(.985);
+  transition:opacity .5s var(--ease),transform .6s var(--ease),visibility .5s}
+.scene.on{opacity:1;visibility:visible;transform:none}
+.scene:not(.on){pointer-events:none}
+
+/* ---------- hero ---------- */
+.hero-inner{position:relative;max-width:660px;text-align:center}
+/* The strings pass behind the wordmark on purpose, but they were striking
+   through the body copy. A soft bloom of the page colour keeps the field
+   visible while giving the text something to sit on. */
+.hero-inner::before{content:'';position:absolute;inset:-10% -18%;z-index:-1;pointer-events:none;
+  background:radial-gradient(58% 52% at 50% 52%, rgba(253,247,236,.94) 0%, rgba(253,247,236,.78) 42%, rgba(253,247,236,0) 74%);
+  filter:blur(8px)}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink3);background:rgba(255,252,246,.72);border:1px solid var(--line);
+  border-radius:999px;padding:7px 15px;backdrop-filter:blur(8px);
+  animation:rise .8s .1s var(--ease) both}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--sage);
+  box-shadow:0 0 0 0 rgba(94,140,106,.5);animation:pulse 2.6s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(94,140,106,0)}}
+
+.title{font-family:var(--disp);font-weight:600;letter-spacing:-.035em;line-height:.94;margin:22px 0 0;
+  font-size:clamp(58px,12vw,132px);display:flex;gap:.28em;justify-content:center;flex-wrap:wrap}
+.title .w{display:inline-flex}
+/* Letters drop in one at a time, like a hand coming down across the strings. */
+.title .l{display:inline-block;opacity:0;transform:translateY(.42em) rotate(3deg);
+  background:linear-gradient(175deg,#3A2A1C 0%,#8A5A28 52%,#C0631A 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  animation:letter .9s var(--ease) forwards;animation-delay:calc(.22s + var(--i) * .055s)}
+@keyframes letter{to{opacity:1;transform:none}}
+
+.lede{margin:20px auto 0;max-width:440px;font-size:16px;line-height:1.68;color:var(--ink2);
+  animation:rise .9s .82s var(--ease) both}
+
+.enter{position:relative;margin-top:34px;display:inline-flex;align-items:center;gap:12px;
+  font-family:var(--ui);font-size:15px;font-weight:600;color:#fff;cursor:pointer;
+  border:0;border-radius:999px;padding:17px 32px;
+  background:linear-gradient(180deg,#F0A845,#D07C21);
+  box-shadow:0 1px 0 rgba(255,255,255,.42) inset, 0 14px 34px -12px rgba(193,99,26,.85);
+  animation:rise .9s .96s var(--ease) both;
+  transition:transform .3s var(--ease),box-shadow .3s var(--ease),filter .2s}
+.enter::after{content:'';position:absolute;inset:-3px;border-radius:999px;pointer-events:none;
+  border:1.5px solid rgba(224,147,47,.5);opacity:0;transform:scale(.94);
+  transition:opacity .4s var(--ease),transform .5s var(--ease)}
+.enter:hover{transform:translateY(-2px);box-shadow:0 1px 0 rgba(255,255,255,.42) inset, 0 22px 44px -14px rgba(193,99,26,.9)}
+.enter:hover::after{opacity:1;transform:scale(1.06)}
+.enter:active{transform:translateY(0) scale(.985)}
+.enter-arrow{transition:transform .35s var(--ease)}
+.enter:hover .enter-arrow{transform:translateX(5px)}
+
+.hint{margin-top:26px;font-size:12.5px;color:var(--ink3);animation:rise 1s 1.25s var(--ease) both}
+
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+
+/* ---------- shelf ---------- */
+.shelf-inner{width:min(1100px,100%);max-height:100%;overflow:auto;padding:8px 4px 20px}
+.shelf-head{display:flex;align-items:center;gap:16px;margin-bottom:26px}
+.back{flex:none;width:42px;height:42px;display:grid;place-items:center;font-size:19px;color:var(--ink2);
+  text-decoration:none;background:rgba(255,252,246,.82);border:1px solid var(--line);border-radius:50%;
+  box-shadow:var(--sh-m);transition:transform .25s var(--ease),color .2s}
+.back:hover{transform:translateX(-3px);color:var(--amber-d)}
+.shelf-head h2{font-family:var(--disp);font-weight:600;font-size:clamp(26px,4vw,36px);letter-spacing:-.025em;margin:0}
+.shelf-head p{margin:3px 0 0;font-size:13.5px;color:var(--ink2)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:16px}
+/* The entrance animates `translate`, never `transform`. A `forwards` fill on
+   transform would outrank the :hover rule and kill the lift on every card,
+   and any later animation on the same property (see .nudge) would drop the
+   card back to its un-entered offset the moment it finished. */
+.card{display:flex;flex-direction:column;text-decoration:none;color:inherit;overflow:hidden;
+  background:rgba(255,252,246,.9);border:1px solid var(--line);border-radius:20px;box-shadow:var(--sh-m);
+  backdrop-filter:blur(10px);
+  opacity:0;translate:0 22px;
+  animation:cardIn .7s var(--ease) forwards;animation-delay:calc(.08s + var(--d) * .09s);
+  transition:transform .35s var(--ease),box-shadow .35s var(--ease),border-color .3s}
+@keyframes cardIn{to{opacity:1;translate:0 0}}
+.card:hover{transform:translateY(-6px);box-shadow:var(--sh-l);border-color:rgba(192,99,26,.3)}
+/* Unfinished instruments read quieter without touching the card's own opacity,
+   which the entrance animation owns. */
+.card[data-soon] .card-body{opacity:.82}
+.card[data-soon] .card-art{filter:grayscale(.4) opacity(.7)}
+.card[data-soon]:hover{transform:translateY(-2px)}
+.card.nudge{animation:cardIn .01s linear forwards, nudge .4s ease-out}
+@keyframes nudge{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+
+/* Card art: each instrument gets a tiny abstract of itself, animated on hover.
+   Every variant must set its own justify/align — `.card-art` is the flex
+   container itself, so a variant switching `display` throws away the grid
+   centring and everything packs into the top-left corner. */
+.card-art{position:relative;height:104px;width:100%;display:grid;place-items:center;gap:0;overflow:hidden;
+  background:linear-gradient(160deg,#F7E9D4,#EFD9BC)}
+.card.live .card-art{background:linear-gradient(160deg,#FFEFD6,#F6D9AE)}
+
+.art-guitar{display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:10px;padding:0 24px}
+.art-guitar .s{width:100%;height:2px;border-radius:2px;
+  background:linear-gradient(90deg,rgba(168,112,63,0),#9A6535 14%,#8B5E34 86%,rgba(168,112,63,0))}
+.art-guitar .s:nth-child(1){height:3.4px}.art-guitar .s:nth-child(2){height:3px}
+.art-guitar .s:nth-child(3){height:2.5px}.art-guitar .s:nth-child(4){height:2.1px}
+.art-guitar .s:nth-child(5){height:1.8px}.art-guitar .s:nth-child(6){height:1.5px}
+.card:hover .art-guitar .s{animation:vib .5s ease-out}
+.card:hover .art-guitar .s:nth-child(2){animation-delay:.05s}
+.card:hover .art-guitar .s:nth-child(3){animation-delay:.1s}
+.card:hover .art-guitar .s:nth-child(4){animation-delay:.15s}
+.card:hover .art-guitar .s:nth-child(5){animation-delay:.2s}
+.card:hover .art-guitar .s:nth-child(6){animation-delay:.25s}
+@keyframes vib{0%,100%{transform:scaleY(1)}30%{transform:scaleY(2.6)}60%{transform:scaleY(.6)}}
+
+.art-piano{display:flex;justify-content:center;align-items:flex-end;gap:3px;padding-bottom:18px}
+.art-piano .k{width:13px;height:46px;border-radius:0 0 3px 3px;background:#FFFDF8;border:1px solid rgba(44,33,24,.16);
+  transition:transform .25s var(--ease)}
+.art-piano .k.b{height:30px;width:9px;background:#4A3626;border-color:#332315;margin:0 -7px;z-index:1}
+.card:hover .art-piano .k:nth-child(3){transform:translateY(4px)}
+.card:hover .art-piano .k:nth-child(6){transform:translateY(4px)}
+
+.art-drums{display:flex;justify-content:center;align-items:center;gap:10px}
+.art-drums .p{width:34px;height:34px;border-radius:50%;border:2.5px solid var(--wood);background:rgba(255,252,246,.6)}
+.art-drums .p:nth-child(2){width:44px;height:44px}
+.card:hover .art-drums .p{animation:bounce .45s ease-out}
+.card:hover .art-drums .p:nth-child(2){animation-delay:.08s}
+.card:hover .art-drums .p:nth-child(3){animation-delay:.16s}
+@keyframes bounce{40%{transform:scale(1.14)}}
+
+.card-body{padding:17px 19px 19px;display:flex;flex-direction:column;flex:1}
+.card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.card-body h3{font-family:var(--disp);font-weight:600;font-size:21px;letter-spacing:-.015em;margin:0}
+.tag{flex:none;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);
+  background:#F3E9DA;border-radius:999px;padding:4px 9px}
+.tag-live{color:#3F6B4C;background:#E4F0E7}
+.card-body p{margin:9px 0 0;font-size:13px;line-height:1.62;color:var(--ink2);flex:1}
+.card-go{margin-top:14px;font-size:12.5px;font-weight:600;color:var(--ink3)}
+.card.live .card-go{color:var(--amber-d)}
+.card.live .card-go em{font-style:normal;display:inline-block;transition:transform .3s var(--ease)}
+.card.live:hover .card-go em{transform:translateX(5px)}
+
+.shelf-foot{margin:26px 0 0;text-align:center;font-size:12px;color:var(--ink3)}
+
+@media (max-width:560px){
+  .scene{padding:22px 16px}
+  .card-art{height:84px}
+}
+
+/* Motion is decoration here; the strings still work without it. */
+@media (prefers-reduced-motion:reduce){
+  *,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}
+  .title .l,.eyebrow,.lede,.enter,.hint,.card{opacity:1;transform:none;translate:none}
+}
+
+/* ================================================================== *
+ *  Small screens — additive only; the desktop layout above is untouched.
+ * ================================================================== */
+@media (max-width:560px){
+  .scene{padding:20px 14px}
+  .hero-inner{max-width:100%}
+  .eyebrow{font-size:10.5px;padding:6px 12px}
+  .title{margin-top:18px;gap:.2em}
+  .lede{font-size:14.5px;margin-top:16px}
+  .enter{margin-top:26px;padding:15px 26px;font-size:14.5px}
+  .hint{margin-top:20px;font-size:11.5px}
+
+  .shelf-inner{padding:4px 2px 16px}
+  .shelf-head{gap:12px;margin-bottom:18px}
+  .back{width:38px;height:38px;font-size:17px}
+  .shelf-head p{font-size:12.5px}
+  /* One column: two 268 px cards cannot both fit, and a squeezed pair reads
+     worse than a clean stack. */
+  .cards{grid-template-columns:1fr;gap:12px}
+  .card-art{height:78px}
+  .card-body{padding:14px 15px 16px}
+  .card-body h3{font-size:19px}
+  .card-body p{font-size:12.5px}
+  .shelf-foot{margin-top:18px;font-size:11px}
+}
+
+@media (pointer:coarse){
+  .enter{min-height:52px}
+  .card,.back,.enter{-webkit-tap-highlight-color:transparent}
+  /* Hover art animations never fire on touch, and the sticky :hover state
+     after a tap leaves a card looking stuck. */
+  .card:hover{transform:none;box-shadow:var(--sh-m)}
+  .card.live:active{transform:scale(.985)}
+}
+
+/* ---------- sound toggle ---------- */
+.sound{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));
+  z-index:70;width:44px;height:44px;display:grid;place-items:center;padding:0;cursor:pointer;
+  color:var(--ink2);background:rgba(255,252,246,.84);border:1px solid var(--line);border-radius:50%;
+  box-shadow:var(--sh-m);backdrop-filter:blur(8px);-webkit-tap-highlight-color:transparent;
+  transition:color .2s,transform .25s var(--ease)}
+.sound:hover{color:var(--amber-d);transform:scale(1.06)}
+.sound svg{width:21px;height:21px;display:block}
+.sound .sound-off{display:none}
+.sound.off{color:var(--ink3)}
+.sound.off .sound-on{display:none}
+.sound.off .sound-off{display:block}
+@media (max-width:560px){.sound{width:40px;height:40px}.sound svg{width:19px;height:19px}}
+
+/* A prototype is playable but honest about it — distinct from both "ready" and
+   "coming soon" so the shelf never over-promises. */
+.tag-proto { color: #8A5A28; background: #F7E6CC; }
