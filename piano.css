@@ -44,3 +44,38 @@
 /* Inline caution inside a panel note, e.g. the latency readout pointing at a
    CPU-only tracker — the one setting that matters most for how this feels. */
 .ctl-note .warn { color: var(--rose); font-weight: 600; }
+
+/* ---------- first-run walkthrough ----------
+   The overlay never receives clicks — only the card does — so whatever is being
+   pointed at stays usable while it is being described. The dimming is a hole
+   with an enormous shadow spread rather than a sheet behind a raised element;
+   see tour.js for why. */
+.tour { position: fixed; inset: 0; z-index: 80; pointer-events: none; }
+.tour[hidden] { display: none; }
+.tour-hole {
+  position: fixed; border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(30, 20, 12, .52), 0 0 0 2px var(--amber) inset;
+  outline: 2px solid rgba(224, 147, 47, .9); outline-offset: 0;
+  transition: left .22s cubic-bezier(.22,1,.36,1), top .22s cubic-bezier(.22,1,.36,1),
+              width .22s cubic-bezier(.22,1,.36,1), height .22s cubic-bezier(.22,1,.36,1);
+}
+/* A step with nothing to point at dims everything and centres the card. */
+.tour.nospot { background: rgba(30, 20, 12, .52); }
+.tour.nospot .tour-hole { display: none; }
+
+.tour-card {
+  position: fixed; pointer-events: auto; width: min(360px, calc(100vw - 24px));
+  background: var(--card); border: 1px solid var(--line2); border-radius: var(--r);
+  box-shadow: var(--sh-m); padding: 16px 17px 14px;
+  transition: left .22s cubic-bezier(.22,1,.36,1), top .22s cubic-bezier(.22,1,.36,1);
+}
+.tour-of { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); }
+.tour-card h3 { font-family: var(--disp); font-weight: 600; font-size: 19px; margin: 5px 0 7px; line-height: 1.2; }
+.tour-card p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink2); }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.tour-actions .btn { padding: 8px 15px; font-size: 13px; }
+.tour-spacer { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-hole, .tour-card { transition: none; }
+}

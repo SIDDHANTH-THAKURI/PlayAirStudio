@@ -147,11 +147,61 @@ class Hand {
   }
 }
 
+/**
+ * Which fingers are allowed to play.
+ *
+ * Ten fingers is the instrument this was built for, and for a lot of people it
+ * is also the problem: play a note with the index and the middle finger comes
+ * down with it, and while `_arbitrate` catches most of that, "most" is not the
+ * same as never — and a stray note is far more annoying than a missing one.
+ * Restricting the hand to one finger removes the question rather than
+ * answering it better, and it is the pose people naturally adopt anyway when
+ * they are picking out a melody rather than playing chords.
+ *
+ * It is a *detector* setting rather than a filter over the output on purpose.
+ * A finger that is not playing must not enter the strike machine at all, or it
+ * still joins clusters in arbitration and can talk a real strike out of
+ * sounding — which would make the option that exists to stop wrong notes
+ * quietly start swallowing right ones.
+ *
+ * It also needs its own thresholds, and that was not obvious. Two of the
+ * defaults exist purely to answer the question this mode has already removed,
+ * and left at their full strength they made one-finger playing miss roughly a
+ * third of what it was asked to play:
+ *
+ *  • **`MIN_EXTEND`** checks the fingertip is far enough from its knuckle to be
+ *    a finger reaching rather than a fist. Point at a surface in front of you
+ *    and your index points *away from the lens*, so it foreshortens and can sit
+ *    under the bar — and then the strike never starts at all. With all five
+ *    fingers this rarely bites, because a *reaching* finger's own travel pushes
+ *    the measurement over the line partway through the tap; a rigid pointing
+ *    finger never does. Whether you cleared it came down to the angle of your
+ *    hand, which is why it felt intermittent rather than broken.
+ *  • **`MIN_ARTIC`** asks the fingertip to travel further than its own palm,
+ *    which is exactly and only how a striking finger is told from the four
+ *    riding along with it. With one finger there is nobody to tell it from —
+ *    and pointing stiffens the finger, so much of the travel is wrist and arm
+ *    rather than reach.
+ *
+ * Both are relaxed rather than removed. Articulation still earns its place
+ * here: a pointed hand *put down* and a pointed hand *tapping* have the same
+ * kinematics if the finger never moves relative to the palm, so something has
+ * to separate them, and this is the only thing that can. `test/piano.mjs`
+ * measures both edges — what the relaxation catches, and that placing a hand
+ * stays silent.
+ */
+export const FINGER_SETS = {
+  all: { fingers: [0, 1, 2, 3, 4], opts: {} },
+  index: { fingers: [1], opts: { MIN_EXTEND: 0.12, MIN_ARTIC: 0.022 } },
+};
+
 export class TapDetector {
   constructor(opts = {}) {
     this.base = { ...opts };
     this.surface = 'desk';
-    this.o = { ...DEFAULTS, ...opts };
+    this.fingers = 'all';
+    this.active = FINGER_SETS.all.fingers;
+    this._retune();
     this.hands = new Map();
     // Straight down in image space until strikes teach us otherwise.
     this.dir = { x: 0, y: 1 };
@@ -163,11 +213,37 @@ export class TapDetector {
 
   reset() { this.hands.clear(); this.dir = { x: 0, y: 1 }; this.learned = 0; this.lastT = null; }
 
+  /** Which finger set is in force. */
+  get fingerSet() { return this.fingers; }
+
+  /**
+   * The one place thresholds are assembled: defaults, then what the surface
+   * asks for, then what the finger set asks for, then anything the caller was
+   * explicit about — which wins, because being explicit is the point of it.
+   */
+  _retune() {
+    this.o = { ...DEFAULTS, ...SURFACES[this.surface],
+      ...FINGER_SETS[this.fingers].opts, ...this.base };
+  }
+
   /** Retune for a desk or for a plane in mid-air. See `SURFACES`. */
   setSurface(kind) {
     this.surface = SURFACES[kind] ? kind : 'desk';
-    this.o = { ...DEFAULTS, ...this.base, ...SURFACES[this.surface] };
+    this._retune();
   }
+
+  /** All ten fingers, or one index finger each. See `FINGER_SETS`. */
+  setFingers(kind) {
+    this.fingers = FINGER_SETS[kind] ? kind : 'all';
+    this.active = FINGER_SETS[this.fingers].fingers;
+    this._retune();
+    // A finger that was mid-strike when it was switched off would otherwise sit
+    // in `falling` forever and come back holding a note nobody played.
+    for (const H of this.hands.values()) { for (const f of H.fingers) f.reset(); H.cluster = null; }
+  }
+
+  /** Is this finger one of the ones that plays? */
+  plays(finger) { return this.active.includes(finger); }
 
   /** Read-only peek for the overlay: what is this finger doing right now? */
   state(id, finger) {
@@ -225,7 +301,7 @@ export class TapDetector {
     const dPalm = ((palm.x - prevPalm.x) * this.dir.x + (palm.y - prevPalm.y) * this.dir.y) / span;
     const settling = t - H.since < o.SETTLE;
 
-    for (let f = 0; f < 5; f++) {
+    for (const f of this.active) {
       const F = H.fingers[f], tip = tips[f];
       // Displacement first, *then* normalise by this frame's span — see the
       // header: normalising position instead would turn "hand moved closer to

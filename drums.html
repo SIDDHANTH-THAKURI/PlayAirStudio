@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#FBF6EC" />
 <title>Air Drums — sticks that aren't there</title>
-<meta name="description" content="Point your index finger and a drumstick appears along it. Swing at the kit and it plays — how fast you were moving is how hard it lands. Webcam hand tracking, physically modelled drums, entirely client-side." />
+<meta name="description" content="Close your hands and a drumstick appears in each. Bring one down through a drum and it sounds, right as the tip goes through the head — how fast you were moving is how hard it lands. Webcam hand tracking, physically modelled drums, entirely client-side." />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥁</text></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,7 +31,7 @@
       </svg>
       <div class="brand-text">
         <h1>Air&nbsp;Drums</h1>
-        <p class="tagline">Point a finger — the stick is already there</p>
+        <p class="tagline">Point a finger, or take a pair of sticks</p>
       </div>
     </div>
 
@@ -81,6 +81,14 @@
         </div>
 
         <div class="ctl">
+          <label>Play with <span class="lbl-q">fingertip is steadier</span></label>
+          <div class="seg" id="segMode">
+            <button data-v="finger">Fingertip</button>
+            <button data-v="stick">Drumsticks</button>
+          </div>
+        </div>
+
+        <div class="ctl">
           <label>Kit size <span class="lbl-q">how far you reach</span></label>
           <div class="seg" id="segSize">
             <button data-v="0.75">Small</button>
@@ -89,12 +97,12 @@
           </div>
         </div>
 
-        <div class="ctl">
+        <div class="ctl" id="reachRow" hidden>
           <label>Stick length</label>
           <div class="seg" id="segReach">
-            <button data-v="1.7">Short</button>
-            <button data-v="2.2">Normal</button>
-            <button data-v="2.8">Long</button>
+            <button data-v="1.4">Short</button>
+            <button data-v="1.9">Normal</button>
+            <button data-v="2.5">Long</button>
           </div>
         </div>
 
@@ -144,37 +152,40 @@
 
     <div class="guide-grid">
       <div class="guide">
-        <h3>The sticks</h3>
+        <h3>Fingertip, or sticks</h3>
         <ul>
-          <li><b>Point your index finger and you're holding a stick.</b> Relax your hand and you've put it
-            down — that is the whole control. Resting, gesturing, scratching your nose: all silent, with
-            no special case for any of them.</li>
-          <li>The stick is drawn <b>along the finger you're pointing with</b> and carries on past it, and
-            the <b>tip is what hits</b>. That makes it a lever: a small flick of the wrist swings the tip a
-            long way, so a comfortable movement is plenty. You should not need to swing hard — swinging
-            hard mostly just makes it loud.</li>
-          <li>The drum you're currently aimed at is <b>ringed in your hand's colour</b>, so you can see
-            what you're about to hit before you commit to the stroke.</li>
-          <li>If the sticks feel too long or too short for the space you have, change <b>Stick length</b>.
-            The tip is both what you aim with and what the detection watches, so the two never disagree.</li>
-          <li>Sit back far enough that the camera can see both hands with room to move. There is
-            <b>nothing to calibrate</b> — the kit is already where it needs to be.</li>
+          <li><b>Fingertip is the default, and it's the one that plays best.</b> Point one index finger
+            with the others tucked in, and the tip of that finger is what strikes. Relax the hand and it
+            stops — the other fingers can't set anything off, because the pose itself is the switch.</li>
+          <li>It is steadier for a reason worth knowing: your fingertip is a point the tracker
+            <i>reports</i>, while a stick's direction has to be worked out from the shape of your hand,
+            and every way of doing that gets shakier as you turn your hand toward the camera.</li>
+          <li><b>Drumsticks</b> are under <b>Play with</b> if you want them. Each one is gripped in the
+            fist and points where your hand points, so <b>angle your fists down at the kit</b> — hold them
+            upright and the sticks point at the ceiling, exactly as they would in life. If a stick looks
+            short and stubby, it's pointing at the camera: tip your hand forward and it comes back.</li>
+          <li>The drum you're currently aimed at is <b>ringed in your hand's colour</b>, with a bright line
+            drawn across it: that line is the drum's surface, and coming down through it is the hit. If the
+            ring goes faint and dashed, you're already <i>below</i> the surface — lift and it comes back.</li>
+          <li>Sit wherever is comfortable. Closer to the camera just means bigger hands on screen, not a
+            different instrument. There is <b>nothing to calibrate</b> — the kit is already where it needs
+            to be.</li>
         </ul>
       </div>
       <div class="guide">
         <h3>Playing</h3>
         <ul>
-          <li><b>Swing at a drum and stop.</b> The hit lands on the stop, which is where a real stick would
-            make its sound, and how fast you were moving when you got there is how hard it lands.</li>
+          <li><b>Bring the tip down through a drum.</b> The hit lands the moment it passes through the
+            head — not when you stop afterwards — and how fast you were moving is how hard it lands.</li>
           <li><b>Harder is brighter, not just louder.</b> A ghost note on the snare and a full backbeat are
             two different sounds, the way they are on a real kit.</li>
           <li><b>Both hands are independent</b>, and each is drawn in its own colour so you can see which
             stick did what.</li>
-          <li><b>Hi-hat:</b> hit the <i>top</i> disc for an open hat, the <i>bottom</i> one for a closed
-            one. Hitting closed slams the open one shut, exactly as the pedal does.</li>
+          <li><b>Hi-hat:</b> through the <i>middle</i> is a closed hat, out at either <i>edge</i> — the two
+            banded ends — is an open one. A closed hit slams the open one shut, exactly as the pedal does.</li>
           <li><b>Ride:</b> the middle is the bell, the outside is the bow — the same as on the real thing.</li>
           <li>Lift the stick between hits. A stroke needs somewhere to come from, so the stick has to come
-            back up before it can land again, which is how drumming works anyway.</li>
+            back above the surface before it can land again, which is how drumming works anyway.</li>
         </ul>
       </div>
     </div>
@@ -182,15 +193,20 @@
     <div class="guide guide-wide">
       <h3>If hits aren't registering</h3>
       <ul>
+        <li><b>Watch the ring.</b> It tells you everything: no ring means the tip isn't over a drum, a
+          faint dashed ring means it's below the surface and needs lifting, a solid ring with a line
+          across it means a stroke will land.</li>
+        <li><b>Try Fingertip.</b> If the sticks are wandering or pointing somewhere you didn't intend,
+          switch under <b>Play with</b> — there is no direction to infer, so there is nothing to wander.</li>
+        <li><b>On sticks, check where they're pointing.</b> If they're aimed off the top of the frame, your
+          fists are upright — tip them forward and down, as if the kit were on a table in front of you,
+          and the sticks come round with them.</li>
         <li>Check the <b>track</b> figure in the header. Below about 20 detections a second a stroke can
           begin and finish between two looks at your hands, and no amount of tuning recovers it. Closing
           other GPU-heavy tabs and enabling hardware acceleration is the fix.</li>
-        <li><b>Make sure you're actually pointing.</b> If no stick appears, the tracker isn't seeing a
-          point — extend the index finger clearly and let the other three fall in. They don't have to
-          make a fist, but they do have to be out of the way.</li>
-        <li><b>Stop, don't follow through.</b> The detector is looking for a stick being brought up short,
-          not for one travelling fast. A long lazy sweep across the kit is deliberately silent, which is
-          what lets you move between drums without playing every one on the way.</li>
+        <li><b>Go through the drum, not near it.</b> A stroke that stops above the head, or that sweeps
+          sideways past it, plays nothing — which is what lets you move between drums without sounding
+          every one on the way.</li>
         <li>If you're reaching uncomfortably far for anything, try a smaller <b>Kit size</b>. The stick
           tip hangs below your hand, so the kit sits lower in the frame than a photo of a kit would —
           that is deliberate, and it is what makes the top row reachable at all.</li>

@@ -1,10 +1,11 @@
 /** main.js — wiring: camera → tracking → tap detection → notes → audio + UI. */
 import { Tracker, Camera, IS_MOBILE } from '../tracking.js';
-import { TapDetector, FINGER_NAMES, SURFACES } from './onset.js';
+import { TapDetector, FINGER_NAMES, SURFACES, FINGER_SETS } from './onset.js';
 import { TablePlane, defaultQuad, quadIsSane } from './geometry.js';
 import { Keyboard, SCALES, NOTE_NAMES, midiName } from './scales.js';
 import { PianoEngine, LOOKAHEAD } from './audio.js';
 import { Overlay, HAND_COL } from './render.js';
+import { Tour } from './tour.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -26,6 +27,13 @@ const DEFAULTS = {
   key: 0, scale: 'major', cols: 12, rows: 1, octave: 4,
   split: true, vol: 0.8, room: 0.18, tone: 0.5, sustain: 0.55,
   names: true, corners: null, camId: '', damp: 'pedal', surface: 'air',
+  /* The walkthrough runs once, on the first visit, and is replayable from the
+   * panel afterwards. Stored so it doesn't greet a returning player. */
+  toured: false,
+  /* All ten by default — it is a piano. One index finger each is there for
+   * anyone who finds the neighbouring fingers coming down with the one they
+   * meant, which is the commonest complaint about playing this way. */
+  fingers: 'all',
 };
 function load() {
   const S = { ...DEFAULTS };
@@ -38,6 +46,7 @@ function load() {
   if (!Array.isArray(S.corners) || !quadIsSane(S.corners)) S.corners = null;
   if (!SCALES[S.scale]) S.scale = 'major';
   if (!SURFACES[S.surface]) S.surface = 'air';
+  if (!FINGER_SETS[S.fingers]) S.fingers = 'all';
   return S;
 }
 let saveT = 0;
@@ -73,6 +82,7 @@ tracker.duty = 1;
 const VIDEO = { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } };
 
 detector.setSurface(S.surface);
+detector.setFingers(S.fingers);
 let plane = new TablePlane(S.corners || defaultQuad());
 let keyboard = new Keyboard(S);
 let calibrating = false, draft = [];
@@ -168,23 +178,27 @@ function strike(ev) {
 
 /* ---------------- calibration ----------------
  *
- * The corners are marked by *tapping* them, not by clicking them, and that is a
- * correctness decision rather than a flourish.
+ * The corners are placed with the cursor. Marking them by tapping them was
+ * tried first and is, on paper, the more correct thing to do: a homography maps
+ * exactly one plane, and every point the instrument is later asked about is a
+ * fingertip landmark sitting a centimetre or two above the desk, so fitting the
+ * quad from taps puts it on the plane the fingertips are actually on and the
+ * parallax cancels exactly. Clicking marks the desk's own surface instead, and
+ * on a low camera reaching far across the desk that gap is worth up to two
+ * keys.
  *
- * A homography maps exactly one plane. Clicking marks the desk itself, but
- * every point the instrument is later asked about is a fingertip landmark,
- * which sits a centimetre or two above the desk even when the pad is touching.
- * Those are two different planes, and the gap between them is parallax that
- * grows with how low the camera is and how far across the desk you reach — a
- * laptop lid is the worst case, and it is also the common one. Measured, a
- * clicked calibration puts taps out by up to a fifth of the surface, which is
- * two whole keys; tapping the corners fits the homography to the plane the
- * fingertips are actually on, and the error cancels exactly. There is a test
- * that models a pinhole camera and checks precisely this.
+ * It was still the wrong trade. Placing a corner by tap requires the tap
+ * detector to be working *before* there is any calibration to tell you whether
+ * it is, so a marginal corner and a marginal detector are indistinguishable,
+ * and marking out the area — the one step you cannot skip — became the least
+ * reliable part of the instrument. A cursor puts the corner exactly where you
+ * meant it, every time. The parallax is real but bounded, it only bites in Desk
+ * mode (Air, the default, has no surface under the fingertips at all), and the
+ * cure is a sentence of instruction: click where your *fingertips* will be, not
+ * where the desk's corner is.
  *
- * Clicking still works as a fallback for anyone whose tracking will not
- * cooperate, and for nudging a corner afterwards — it is just no longer the
- * thing being asked for.
+ * The pinhole test in test/piano.mjs still models the parallax, and is what
+ * would tell us how much a future tap-assisted mode would buy back.
  */
 const CORNER_NAMES = ['far left', 'far right', 'near right', 'near left'];
 
@@ -201,23 +215,8 @@ function paintCalHint() {
   const n = draft.length;
   const where = S.surface === 'air' ? 'in the air in front of you' : 'on your desk';
   el.calHint.innerHTML = n < 4
-    ? `<b>Tap the ${CORNER_NAMES[n]} corner</b> of your playing area ${where}, with one finger — ${n}/4.`
+    ? `<b>Click the ${CORNER_NAMES[n]} corner</b> of your playing area ${where} — ${n}/4.`
     : 'Looks right? Use this area. Click any corner to nudge it.';
-}
-
-/** A strike during calibration marks a corner instead of playing a note. */
-let lastCornerAt = -9;
-function calibrationTap(ev) {
-  if (draft.length >= 4) return;
-  /* One tap, one corner. A tap can legitimately produce more than one strike —
-   * two fingers landing together is a chord, and the instrument is right to
-   * report both — but here that would swallow two corners at once and leave
-   * the quad describing a desk nobody marked out. */
-  if (ev.t - lastCornerAt < 0.3) return;
-  lastCornerAt = ev.t;
-  draft.push({ x: ev.x, y: ev.y });
-  el.calUse.disabled = !(draft.length === 4 && quadIsSane(draft));
-  paintCalHint();
 }
 function endCalibration(commit) {
   if (commit && draft.length === 4 && quadIsSane(draft)) {
@@ -246,6 +245,70 @@ el.stage.addEventListener('click', (e) => {
   el.calUse.disabled = !(draft.length === 4 && quadIsSane(draft));
   paintCalHint();
 });
+
+/* ---------------- walkthrough ----------------
+ *
+ * Air Piano has one genuinely unguessable idea in it — that a note fires when
+ * your fingertip is *stopped*, so you strike rather than press — and one step
+ * you cannot skip, marking out where the keyboard is. Neither is discoverable
+ * by poking at the thing, and both are cheap to say in a sentence. That is the
+ * whole scope of this: five cards on first run, and a way back to them.
+ *
+ * It runs after the camera is live, so every step points at something real and
+ * the player can try each one as it is described.
+ */
+const tour = new Tour({
+  root: $('tour'), hole: $('tourHole'), card: $('tourCard'),
+  onDone: () => {
+    S.toured = true; persist();
+    // The reason the tour exists is to arrive here knowing what this is for.
+    if (!S.corners) startCalibration();
+  },
+});
+
+function tourSteps() {
+  const where = S.surface === 'air' ? 'in the air in front of you' : 'on your desk';
+  return [
+    {
+      target: 'stage',
+      title: 'There is no keyboard',
+      body: `You mark out a rectangle ${where}, and that rectangle becomes the keys.
+        Your webcam watches your hands — the video is read in this tab and thrown
+        away frame by frame.`,
+    },
+    {
+      target: 'calBtn',
+      title: 'Mark out your playing area',
+      body: `<b>Click</b> the four corners of that rectangle in the camera view —
+        far-left, far-right, near-right, near-left — then <b>Use this area</b>.
+        Click any corner afterwards to nudge it. It is remembered, so this is a
+        once-per-setup job; redo it if you move the camera.`,
+    },
+    {
+      target: 'stage',
+      title: 'Strike, don\'t press',
+      body: `A note fires the instant your fingertip is <b>stopped</b>, which is why
+        a crisp tap speaks and slowly lowering your hand doesn't — that is what
+        lets you rest between phrases. <b>How hard you strike is how loud it is.</b>`,
+    },
+    {
+      target: 'segFingers',
+      title: 'One finger, if ten is too many',
+      body: `Tap a note and its neighbours tend to come down with it. On
+        <b>All fingers</b> the instrument works out which one actually reached;
+        on <b>Index only</b> there is nothing to work out, and nothing else can
+        misfire. Start on <i>Index only</i> if notes keep arriving in pairs.`,
+    },
+    {
+      target: 'segSurface',
+      title: 'Air or desk, and everything else',
+      body: `<b>Air</b> needs no surface and lets you keep looking at the screen.
+        <b>Desk</b> gives you something to feel, but wants the lid tilted down at
+        it. Key, scale, how many keys, note length and volume are all down this
+        panel — and <b>How to play</b> has the long version of all of it.`,
+    },
+  ];
+}
 
 /* ---------------- controls ---------------- */
 function rebuild() { keyboard = new Keyboard(S); paintRange(); paintCalBtn(); }
@@ -292,6 +355,9 @@ function initControls() {
 
   el.selCam.onchange = (e) => switchCamera(e.target.value);
   seg('segDamp', () => S.damp, (v) => { S.damp = v; persist(); });
+  seg('segFingers', () => S.fingers, (v) => {
+    S.fingers = v; detector.setFingers(v); piano.ready && piano.allOff(); holding.clear(); persist();
+  });
   seg('segSurface', () => S.surface, (v) => {
     S.surface = v; detector.setSurface(v); persist(); paintCalHint(); paintCalBtn();
     // The plane you marked out on a desk is not the plane you mime in the air,
@@ -309,6 +375,13 @@ function initControls() {
     plane = new TablePlane(defaultQuad());
     S.corners = null; persist();
     draft = []; el.calUse.disabled = true;
+  };
+  $('tourBtn').onclick = () => {
+    // Replaying it from a half-marked-out area would leave the calibration bar
+    // open behind the cards and finish by reopening it, so close that first.
+    if (calibrating) endCalibration(false);
+    $('helpModal').hidden = true;
+    tour.start(tourSteps());
   };
   $('helpBtn').onclick = () => ($('helpModal').hidden = false);
   $('helpClose').onclick = () => ($('helpModal').hidden = true);
@@ -405,10 +478,12 @@ async function boot() {
   el.veil.hidden = true;
   S.running = true;
   pump();
-  // First run: the default quad is only a guess at where the desk is, so send
-  // people straight into marking it out rather than letting them wonder why
-  // the keys are in the wrong place.
-  if (!S.corners) startCalibration();
+  /* First run: walk through it, and let the walkthrough hand over to marking
+   * out the area when it finishes or is skipped. After that the default quad is
+   * only a guess at where the desk is, so send people straight into marking it
+   * out rather than letting them wonder why the keys are in the wrong place. */
+  if (!S.toured) tour.start(tourSteps());
+  else if (!S.corners) startCalibration();
 }
 
 /**
@@ -481,13 +556,20 @@ function frame() {
     lastSeq = handsSeq;
     live = identify(hands);
     const events = detector.update(live.map((h) => ({ id: h.id, lm: h.lm })), handsAt);
-    for (const ev of events) (calibrating ? calibrationTap : strike)(ev);
+    /* The detector keeps running while the corners are being placed — it stays
+     * warm, and the overlay goes on showing which fingers it can see — but
+     * nothing sounds. Waving a hand over the area you are marking out should
+     * not play a note through the keyboard you have not finished defining. */
+    if (!calibrating) for (const ev of events) strike(ev);
   }
 
   const overlayHands = live.map((h) => ({
     id: h.id,
     tips: [4, 8, 12, 16, 20].map((i) => h.lm[i]),
     states: [0, 1, 2, 3, 4].map((f) => detector.state(h.id, f)),
+    // Which fingers can actually play, so the ones that can't say so rather
+    // than sitting there looking armed and never sounding.
+    plays: [0, 1, 2, 3, 4].map((f) => detector.plays(f)),
   }));
 
   overlay.draw({
@@ -532,6 +614,6 @@ document.addEventListener('visibilitychange', () => {
 initControls();
 overlay.resize();
 showStart();
-window.airPiano = { tracker, detector, piano, overlay, S, get plane() { return plane; }, get keyboard() { return keyboard; } };
+window.airPiano = { tracker, detector, piano, overlay, S, get plane() { return plane; }, get keyboard() { return keyboard; }, get draft() { return draft; }, tour };
 tracker.preload().catch(() => {});
 requestAnimationFrame(frame);

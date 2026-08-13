@@ -227,6 +227,21 @@ export class Overlay {
       const x = tip.x * this.w, y = tip.y * this.h;
       const st = hand.states?.[i];
       const falling = st?.phase === 'falling';
+      /* A finger switched off is drawn as a faint outline — present, so you can
+       * still see the tracker has your hand, but visibly not armed. Leaving it
+       * looking identical to a live one would make "one finger" mode read as
+       * the instrument having gone deaf on four of them. */
+      const plays = hand.plays ? hand.plays[i] : true;
+      if (!plays) {
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.8, 0, TAU);
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = col;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        continue;
+      }
       // A fingertip on its way down is shown swelling. That is the only moment
       // where the player can see the machine agreeing with them *before* a note
       // exists — it turns a missed tap from a mystery into a visible near-miss.

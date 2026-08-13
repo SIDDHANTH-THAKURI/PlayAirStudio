@@ -148,14 +148,31 @@ try {
   await evl(`[...document.getElementById('segSize').children].find(b => b.dataset.v === '1').click(); true`);
   await sleep(150);
 
+  /* Fingertip is the default, because a fingertip is a landmark the tracker
+   * reports while a stick's direction has to be inferred from the shape of a
+   * hand. Both are real instruments here, so both are exercised below. */
+  ok(await evl(`airDrums.S.mode === 'finger' && airDrums.detector.mode === 'finger'`),
+    'fingertip is the mode out of the box');
+  ok(await evl(`document.getElementById('reachRow').hidden`),
+    'and stick length is put away, since there is no stick');
+
+  const setMode = async (m) => {
+    await evl(`[...document.getElementById('segMode').children].find(b => b.dataset.v === '${m}').click(); true`);
+    await sleep(200);
+  };
+  await setMode('stick');
+  ok(await evl(`airDrums.detector.mode === 'stick' && !document.getElementById('reachRow').hidden`),
+    'switching to sticks brings the stick settings back');
+
   /* Stick length is both what you aim with and what the detection watches, so
    * the two must never drift apart — that would put hits where nobody aimed. */
-  await evl(`[...document.getElementById('segReach').children].find(b => b.dataset.v === '2.8').click(); true`);
+  await evl(`[...document.getElementById('segReach').children].find(b => b.dataset.v === '2.5').click(); true`);
   await sleep(150);
-  ok(await evl(`airDrums.detector.reach === 2.8 && airDrums.S.reach === 2.8`),
+  ok(await evl(`airDrums.detector.reach === 2.5 && airDrums.S.reach === 2.5`),
     'changing stick length retunes the detector too');
-  await evl(`[...document.getElementById('segReach').children].find(b => b.dataset.v === '2.2').click(); true`);
+  await evl(`[...document.getElementById('segReach').children].find(b => b.dataset.v === '1.9').click(); true`);
   await sleep(150);
+  await setMode('finger');
 
   /* ---- the whole path, end to end ---- */
   console.log('\nplaying');
@@ -186,48 +203,65 @@ try {
   let stalled = false;
   const pok = (c, m, x = '') => { if (!stalled) ok(c, m, x); };
 
-  /* Script a pointing hand that *rotates about the wrist*, because that is what
-   * a drum stroke is — the wrist barely travels and the tip swings. Sliding a
-   * point around would exercise the detector on a gesture nobody makes.
+  /* Script a pair of *fists* moving up and down, because that is what this
+   * instrument is played with: the sticks are gripped in the hand and the
+   * stroke brings the tip down through a drum's head. Nothing here bends a
+   * finger, which is the point — the app must not care.
    *
-   * The wrist is placed so the tip arrives on the target pad at the end of the
-   * swing, which is the only way to assert that where you aim is what sounds.
+   * Each scheduled stroke owns a window of time. Outside it that hand is simply
+   * not in frame, which is how the hand gets from one drum to the next: with
+   * the gap longer than the tracker's own re-acquire threshold, the detector
+   * resets that arm and there is no travel to model. Sliding a hand across the
+   * kit instead would be a downward move through other drums' surfaces — real
+   * behaviour, correctly played, and a rotten thing to build a wiring test on.
+   *
    * Strokes are deliberately unhurried: a headless fake camera delivers frames
    * irregularly and a genuinely fast stroke can begin and finish inside one
    * gap. That floor is characterised properly in test/drums.mjs at controlled
    * sample rates; what is being proved here is that the chain is wired up. */
   await evl(`(() => {
     const KN = [5,9,13,17], TIPS = [8,12,16,20], span = 0.11;
-    const REST = 0.55;                       // stick angled down at the kit
-    const LEAD = 0.55;                       // s spent moving to the next drum
+    const PRE = 0.5, POST = 0.6;             // s the hand is in frame either side
     window.__det = 0; window.__schedule = []; window.__t0 = 1e9;
     const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
 
-    /* One stroke's rotation over time: swing down, brake, hold, lift back. */
-    const swingAt = (t, s) => {
-      const u = t - s.at, dur = 0.18, brake = 0.08, rest = 0.22, lift = 0.34;
-      if (u <= 0) return 0;
-      if (u < dur) return s.swing * (u / dur) ** 2 * 0.75;
-      const b = Math.min(u - dur, brake);
-      const p = s.swing * 0.75 + s.swing * 0.25 * (b / brake) * (2 - b / brake);
-      if (u < dur + brake) return p;
-      const after = u - dur - brake;
-      return after < rest ? s.swing : s.swing * (1 - clamp((after - rest) / lift, 0, 1));
+    /* Wrist → striking point, for a hand pointing straight down the screen.
+     * Mirrors src/drums/stick.js, since a stub that placed the tip anywhere
+     * else would be testing its own arithmetic rather than the app's. Sideways
+     * as well as down, because a fingertip sits off to one side of the wrist
+     * and ignoring that aims every stroke half a pad-width wide.
+     *
+     * The 1.006 is the fixture's own doing: this hand's knuckles are splayed,
+     * so wrist-to-middle-knuckle comes out a touch longer than \`span\`. */
+    const offset = () => {
+      if (airDrums.S.mode === 'finger') return { dx: -0.34 * span, dy: 1.85 * span };
+      const sp = span * 1.006, k = airDrums.S.reach / 1.9;
+      const unit = clamp(sp * airDrums.S.reach, 0.11 * k, 0.26 * k);
+      return { dx: 0, dy: span * 0.74 + unit * (span / sp) };   // …× how foreshortened
     };
 
-    // Index out, the rest in — the stick is drawn along the index finger, so
-    // that is the hand this instrument has to be driven with.
-    const pointer = (wx, wy, angle) => {
+    /* One stroke's tip height over time: wait above the head, come down
+     * through it, hold, lift back. */
+    const tipAt = (t, s) => {
+      const top = s.sy - s.ry * 1.3, bottom = s.sy + s.ry * 1.3;
+      const u = t - s.at, fall = 0.22, hold = 0.16, lift = 0.30;
+      if (s.hold || u <= 0) return top;
+      if (u < fall) return top + (bottom - top) * (u / fall) ** 1.6;
+      if (u < fall + hold) return bottom;
+      return bottom + (top - bottom) * clamp((u - fall - hold) / lift, 0, 1);
+    };
+
+    /* A hand built from a wrist and a palm. For sticks every finger is curled,
+     * so the grip reads as closed; for fingertip the index reaches out and the
+     * rest stay in, which is the pose that arms that mode. */
+    const poseHand = (wx, wy) => {
       const lm = Array.from({ length: 21 }, () => ({ x: wx, y: wy }));
-      const ux = Math.cos(angle), uy = Math.sin(angle);
-      const px = -uy, py = ux;
       const sp = [-0.34, -0.11, 0.11, 0.34];
-      KN.forEach((k, i) => {
-        lm[k] = { x: wx + ux*span + px*sp[i]*span, y: wy + uy*span + py*sp[i]*span };
-      });
+      const finger = airDrums.S.mode === 'finger';
+      KN.forEach((k, i) => { lm[k] = { x: wx + sp[i]*span, y: wy + span }; });
       TIPS.forEach((t, i) => {
-        const reach = i === 0 ? 0.95 : 0.38;
-        lm[t] = { x: lm[KN[i]].x + ux*span*reach, y: lm[KN[i]].y + uy*span*reach };
+        const reach = finger && i === 0 ? 0.85 : 0.34;
+        lm[t] = { x: lm[KN[i]].x, y: lm[KN[i]].y + span*reach };
       });
       lm[0] = { x: wx, y: wy };
       return lm;
@@ -242,32 +276,20 @@ try {
       if (!window.__schedule.length) return [];
       window.__det++;
       const t = performance.now() / 1000 - window.__t0;
-      const reach = span * (1 + airDrums.S.reach);     // wrist → knuckle → tip
-      /* One hand per *hand*, not one per stroke. Returning a hand for every
-       * scheduled stroke puts four of them in frame at once, all with the same
-       * handedness label, and they then share one slot of detector state and
-       * stamp on each other's history — which reads as the app losing strokes
-       * when in fact the stub was inventing hands. */
+      const off = offset();
+      /* One hand per *hand*. Returning a hand for every scheduled stroke puts
+       * four of them in frame at once, all with the same handedness label, and
+       * they then share one slot of detector state and stamp on each other's
+       * history — which reads as the app losing strokes when in fact the stub
+       * was inventing hands. */
       const byHand = new Map();
       for (const s of window.__schedule) {
-        const h = byHand.get(s.hand);
-        // Move to the next target well before swinging at it, and *travel*
-        // rather than teleport. A wrist that jumps across the kit in one frame
-        // is a huge apparent velocity followed by a dead stop, which is the
-        // exact signature of a stroke — the detector would be right to play it,
-        // and nobody's arm does that.
-        if (t >= s.at - LEAD || !h) byHand.set(s.hand, { cur: s, prev: h ? h.cur : s });
+        if (t < s.at - PRE || (!s.hold && t > s.at + POST)) continue;
+        byHand.set(s.hand, s);
       }
-      return [...byHand.entries()].map(([hand, { cur, prev }]) => {
-        const at = (s) => {
-          const end = REST + s.swing;
-          return { x: s.x - Math.cos(end) * reach, y: s.y - Math.sin(end) * reach };
-        };
-        const a = at(prev), b = at(cur);
-        const k = clamp((t - (cur.at - LEAD)) / (LEAD * 0.75), 0, 1);
-        const e = k * k * (3 - 2 * k);                    // ease, so it starts and ends still
-        const wx = a.x + (b.x - a.x) * e, wy = a.y + (b.y - a.y) * e;
-        return { lm: pointer(wx, wy, REST + swingAt(t, cur)), world: null, x: wx,
+      return [...byHand.entries()].map(([hand, s]) => {
+        const wx = s.x - off.dx, wy = tipAt(t, s) - off.dy;
+        return { lm: poseHand(wx, wy), world: null, x: wx,
                  label: hand === 'left' ? 'Left' : 'Right', score: 0.95 };
       });
     };
@@ -304,6 +326,10 @@ try {
     while (Date.now() - t0 < 25000 && (await evl('window.__det')) < 8) await sleep(150);
     return (await evl('window.__det')) >= 8;
   };
+  /* Every take judges its own frame delivery. Chrome's fake camera can stop
+   * partway through a run, and a single check before the first take says
+   * nothing about the third — which showed up as the last take reporting zero
+   * hits while the earlier ones were perfect. */
   const play = async (schedule, secs) => {
     await evl(`window.__schedule = ${JSON.stringify(schedule)}; window.__t0 = 1e9; window.__det = 0; true`);
     await pumping();
@@ -312,12 +338,16 @@ try {
       airDrums.overlay.hits.length = 0;
       window.__t0 = performance.now() / 1000 + 0.25; true`);
     await sleep(secs * 1000);
-    return { hits: await evl('window.__hits'), det: await evl('window.__det'),
-             blooms: await evl('window.__blooms'), raw: await evl('window.__raw') };
+    const take = { hits: await evl('window.__hits'), det: await evl('window.__det'),
+                   blooms: await evl('window.__blooms'), raw: await evl('window.__raw') };
+    // Below about four looks a second a stroke can begin and finish between two
+    // of them, and every assertion below would be about the camera.
+    if (take.det / secs < 4) stalled = true;
+    return take;
   };
 
   const aim = await evl(`(() => { const p = airDrums.kit.pads();
-    const g = (id) => { const q = p.find(x => x.id === id); return { x: q.x, y: q.y }; };
+    const g = (id) => { const q = p.find(x => x.id === id); return { x: q.x, sy: q.sy, rx: q.rx, ry: q.ry }; };
     return { snare: g('snare'), floor: g('floor'), hihat: g('hihat'), ride: g('ride') }; })()`);
 
   /* The aim ring is what turns hitting the right drum from guesswork into
@@ -327,41 +357,50 @@ try {
   await evl(`(() => {
     const dr = airDrums.overlay.draw.bind(airDrums.overlay);
     airDrums.overlay.draw = (f) => {
-      window.__aim = (f.sticks || []).map(s => ({ id: s.id, over: s.over, hold: +s.hold.toFixed(2) }));
+      window.__aim = (f.sticks || []).map(s => ({ id: s.id, over: s.over, armed: !!s.armed, hold: +s.hold.toFixed(2) }));
       return dr(f);
     };
   })(); true`);
 
-  /* Park a stick over one drum and never swing it. `at: 99` puts the stroke far
-   * enough in the future that the hand simply sits there, and `swing: 0` is
-   * what makes the parked pose the aimed one: the wrist is placed so the tip
-   * arrives on target at the *end* of the swing, so a parked hand scripted with
-   * a real swing angle rests somewhere else entirely — which is a fact about
-   * this stub's geometry and not about the app. */
+  /* Park a stick over one drum and never swing it — `hold` keeps the hand in
+   * frame indefinitely, resting just above that drum's surface, which is
+   * exactly the pose the ring is meant to describe. */
   const restOver = async (id) => {
-    const pad = await evl(`(() => { const p = airDrums.kit.pads().find(x => x.id === '${id}'); return { x: p.x, y: p.y }; })()`);
-    const park = [{ at: 99, swing: 0, hand: 'right', x: pad.x, y: pad.y }];
+    const pad = await evl(`(() => { const p = airDrums.kit.pads().find(x => x.id === '${id}');
+      return { x: p.x, sy: p.sy, ry: p.ry }; })()`);
+    const park = [{ at: 0, hold: true, hand: 'right', ...pad }];
     await evl(`window.__schedule = ${JSON.stringify(park)}; window.__t0 = performance.now() / 1000; window.__det = 0; window.__aim = null; true`);
     // The pump has to be delivering before any of this means anything: right
     // after the tracker is stubbed there is still a real inference in flight,
-    // and it blocks requestVideoFrameCallback outright for seconds.
-    await pumping();
+    // and it blocks requestVideoFrameCallback outright for seconds. And the
+    // fake camera sometimes simply stops, which is the environment rather than
+    // the app — say so instead of reporting nine failures about a still hand.
+    const alive = await pumping();
     await sleep(500);
-    return (await evl(`window.__aim`)) || [];
+    return { alive, sticks: (await evl(`window.__aim`)) || [] };
   };
+  let aimStalled = false;
   for (const want of ['floor', 'crash', 'snare']) {
-    const [s0] = await restOver(want);
-    pok(!!s0 && s0.hold > 0.9, 'a pointing hand raises its stick', `hold ${s0 ? s0.hold : '—'}`);
+    const { alive, sticks: [s0] } = await restOver(want);
+    // Skip only this block — the camera often comes back, and the play section
+    // below decides for itself whether it was delivering frames.
+    if (!alive) { aimStalled = true; break; }
+    pok(!!s0 && s0.hold > 0.9, 'a pointing hand is armed', `hold ${s0 ? s0.hold : '—'}`);
     pok(!!s0 && s0.over === want, `resting over the ${want} says so, before any stroke`,
       `→ ${s0 ? s0.over : 'nothing'}`);
+    /* The ring's second job: not merely "this drum" but "and a stroke would
+     * land". A stick resting above the surface must read as ready, or the one
+     * cue the player has for why nothing is sounding is itself wrong. */
+    pok(!!s0 && s0.armed, `and reads as ready to strike the ${want}`);
   }
+  if (aimStalled) console.log('  SKIP  aim checks — the fake webcam stopped delivering frames');
 
   const TAKE = 6.5;
   const r = await play([
-    { at: 0.0, swing: 0.9, hand: 'right', ...aim.snare },
-    { at: 1.5, swing: 0.9, hand: 'right', ...aim.floor },
-    { at: 3.0, swing: 0.9, hand: 'right', ...aim.snare },
-    { at: 4.5, swing: 0.9, hand: 'right', ...aim.floor },
+    { at: 0.0, hand: 'right', ...aim.snare },
+    { at: 1.5, hand: 'right', ...aim.floor },
+    { at: 3.0, hand: 'right', ...aim.snare },
+    { at: 4.5, hand: 'right', ...aim.floor },
   ], TAKE);
 
   if (r.det === 0) {
@@ -372,7 +411,7 @@ try {
     console.log(`        tracker delivered ~${(r.det / TAKE).toFixed(0)} looks/s in this environment`);
   }
   const dump = (label, take) => {
-    console.log(`        ${label}: ${take.raw.length} stroke(s) detected`);
+    console.log(`        ${label}: ${take.raw.length} stroke(s) detected, ${take.det} looks at the hands`);
     for (const x of take.raw) console.log(`          ${x.id} vel ${x.v} at (${x.at.join(', ')}) → ${x.pad || 'nothing'}`);
   };
   dump('snare / floor', r);
@@ -388,29 +427,45 @@ try {
   pok(r.blooms.every((b, i) => b.pad === (r.hits[i].voice)),
     'the drum that lights up is the drum that sounded');
 
-  /* Hitting the top of the hi-hat is the open one and the bottom is closed —
-   * the only expression a kit gets from *where* on a pad you strike, and worth
-   * proving end to end because it is easy to wire the axis up backwards. */
+  /* Through the middle of the hi-hat is the closed one and out at the edge is
+   * the open one — the only expression a kit gets from *where* on a pad you
+   * strike, and worth proving end to end because it is easy to wire the axis
+   * up backwards. */
   const hats = await play([
-    { at: 0.0, swing: 0.9, hand: 'right', x: aim.hihat.x, y: aim.hihat.y - 0.045 },
-    { at: 1.6, swing: 0.9, hand: 'right', x: aim.hihat.x, y: aim.hihat.y + 0.045 },
+    { at: 0.0, hand: 'right', ...aim.hihat },
+    { at: 1.6, hand: 'right', ...aim.hihat, x: aim.hihat.x + aim.hihat.rx * 0.8 },
   ], 3.2);
   dump('hi-hat', hats);
   const voices = hats.hits.map((h) => h.voice);
   pok(voices.includes('hihatOpen') && voices.includes('hihat'),
-    'the top of the hi-hat is open and the bottom is closed', voices.join(' ') || '(nothing)');
+    'the middle of the hi-hat is closed and the edge is open', voices.join(' ') || '(nothing)');
 
   /* Both hands at once, independently — the whole point of two sticks. */
   const both = await play([
-    { at: 0.0, swing: 0.9, hand: 'left', ...aim.hihat },
-    { at: 0.7, swing: 0.9, hand: 'right', ...aim.snare },
-    { at: 1.6, swing: 0.9, hand: 'left', ...aim.hihat },
-    { at: 2.3, swing: 0.9, hand: 'right', ...aim.snare },
+    { at: 0.0, hand: 'left', ...aim.hihat },
+    { at: 0.7, hand: 'right', ...aim.snare },
+    { at: 1.6, hand: 'left', ...aim.hihat },
+    { at: 2.3, hand: 'right', ...aim.snare },
   ], 4.0);
   dump('two hands', both);
   const hands = new Set(both.blooms.map((b) => b.hand));
   pok(both.hits.length >= 3, 'both hands play at once', `(${both.hits.length}/4)`);
   pok(hands.size === 2, 'and each stick is credited to its own hand', [...hands].join(' ') || '(none)');
+
+  /* And the same path again with sticks in hand. The detector is shared, so
+   * what this proves is the mode switch: the pose, the grip gate and the
+   * thresholds all have to change together, and any one of them left behind
+   * means the other instrument silently stops playing. */
+  await setMode('stick');
+  const withSticks = await play([
+    { at: 0.0, hand: 'right', ...aim.snare },
+    { at: 1.5, hand: 'right', ...aim.floor },
+  ], 3.2);
+  dump('sticks', withSticks);
+  pok(withSticks.hits.length >= 1, 'drumsticks play too', `(${withSticks.hits.length}/2)`);
+  pok(withSticks.hits.every((h) => h.voice === 'snare' || h.voice === 'floor'),
+    'and land where they were aimed', withSticks.hits.map((h) => h.voice).join(' ') || '(nothing)');
+  await setMode('finger');
 
   ok(exceptions.length === 0, 'no exceptions during play', exceptions[0] || '');
 
@@ -418,14 +473,18 @@ try {
    * whole proposition of an air instrument — there is no physical object to
    * aim at, so what is on screen *is* the instrument — and a screenshot is the
    * only assertion that catches "it works but looks wrong". */
+  /* Half a second of pre-roll so both sticks are fully raised before anything
+   * moves, then capture a third of a second into the right hand's stroke —
+   * past the crossing, so the bloom and the ripple are still on the snare,
+   * while the left stick sits raised over the hi-hat with its aim ring. */
   await evl(`(() => {
-    const p = airDrums.kit.pads(), sn = p.find(x => x.id === 'snare');
-    window.__schedule = [{ at: 0.0, swing: 0.9, hand: 'right', x: sn.x, y: sn.y },
-                         { at: 0.15, swing: 0.9, hand: 'left', x: p.find(x => x.id === 'hihat').x,
-                           y: p.find(x => x.id === 'hihat').y }];
-    window.__t0 = performance.now() / 1000 - 0.30;
+    const g = (id) => { const q = airDrums.kit.pads().find(x => x.id === id);
+      return { x: q.x, sy: q.sy, ry: q.ry }; };
+    window.__schedule = [{ at: 0.0, hand: 'right', ...g('snare') },
+                         { at: 0.0, hold: true, hand: 'left', ...g('hihat') }];
+    window.__t0 = performance.now() / 1000 + 0.5;
   })(); true`);
-  await sleep(450);
+  await sleep(800);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(new URL('./screenshot-drums.png', import.meta.url), Buffer.from(shot.result.data, 'base64'));
   console.log('\n  screenshot → test/screenshot-drums.png');

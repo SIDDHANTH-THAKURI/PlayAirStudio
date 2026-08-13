@@ -223,8 +223,9 @@ const tapCycle = (t, t0, { dur = 0.09, depth = 0.34, rest = 0.10, lift = 0.12 } 
 };
 
 /** Drive the detector at a fixed rate. `at(t)` returns hands for that instant. */
-function run(secs, at, { fps = 60, opts } = {}) {
+function run(secs, at, { fps = 60, opts, fingers } = {}) {
   const det = new TapDetector(opts);
+  if (fingers) det.setFingers(fingers);
   const events = [];
   const n = Math.round(secs * fps);
   for (let i = 0; i < n; i++) {
@@ -315,6 +316,107 @@ const oneHand = (fn) => (t) => makeHand('right', fn(t));
   const dip = (t) => tapCycle(t, 0.35, { dur: 0.09, depth: 0.42 });
   const r = run(2.0, oneHand((t) => ({ hand: dip(t), depths: [0, (x) => 0, 0, 0, 0].map(() => 0) })));
   ok(r.events.length === 0, 'a big hand dip alone still plays nothing', `(${r.events.length})`);
+}
+
+/* --- one finger per hand --------------------------------------------
+ * Arbitration gets the passenger question right most of the time, and "most"
+ * is what this setting is for: a stray note is worse than a missing one, and
+ * restricting the hand to one finger removes the question instead of answering
+ * it better. */
+{
+  const tap = (t) => tapCycle(t, 0.35, { dur: 0.09, depth: 0.34 });
+  const both = (t) => ({ depths: [0, tap(t), tap(t), 0, 0] });
+
+  const all = run(2.0, oneHand(both));
+  ok(all.events.length === 2, 'with all fingers, two deliberate fingers are a chord',
+    `(${all.events.length})`);
+
+  const one = run(2.0, oneHand(both), { fingers: 'index' });
+  ok(one.events.length === 1 && one.events[0].finger === 1,
+    'with index only, the same gesture is one note — the index',
+    `(${one.events.length}: fingers ${one.events.map((e) => e.finger)})`);
+
+  // The index must still play exactly as well by itself, or the setting is a
+  // trade rather than a fix.
+  const solo = run(2.0, oneHand((t) => ({ depths: [0, tap(t), 0, 0, 0] })), { fingers: 'index' });
+  ok(solo.events.length === 1 && solo.events[0].finger === 1,
+    'and a plain index tap is untouched', `(${solo.events.length})`);
+
+  // A middle-finger tap on its own is simply not this instrument any more.
+  const other = run(2.0, oneHand((t) => ({ depths: [0, 0, tap(t), 0, 0] })), { fingers: 'index' });
+  ok(other.events.length === 0, 'while any other finger is silent, however hard it taps',
+    `(${other.events.length})`);
+
+  /* Off means *out of the detector*, not filtered afterwards. A discarded
+   * strike would still have joined the arbitration cluster, and a strong one
+   * could then talk the index out of sounding — so the option that exists to
+   * stop wrong notes would start swallowing right ones. */
+  const shadowed = run(2.0, oneHand((t) => ({
+    depths: [0, tapCycle(t, 0.35, { dur: 0.09, depth: 0.22 }), tapCycle(t, 0.35, { dur: 0.09, depth: 0.55 }), 0, 0],
+  })), { fingers: 'index' });
+  ok(shadowed.events.length === 1,
+    'a much stronger neighbour cannot arbitrate the index away', `(${shadowed.events.length})`);
+
+  const det = new TapDetector();
+  det.setFingers('index');
+  ok(det.plays(1) && !det.plays(2) && det.fingerSet === 'index', 'the setting reports itself');
+  det.setFingers('nonsense');
+  ok(det.fingerSet === 'all', 'and an unknown one falls back to all ten');
+}
+
+/* --- what one finger buys, and what it must not cost ----------------
+ * Two of the detector's gates exist only to answer questions this mode has
+ * already removed. `MIN_EXTEND` refuses a finger that isn't reaching, because
+ * a whole hand coming down is not a chord; `MIN_ARTIC` asks which finger of
+ * several actually struck. With one finger there are no passengers and no
+ * cluster, so both can be relaxed — which is what pulls in the pointing hand
+ * that comes down mostly as one piece and only leads a little with the tip.
+ *
+ * The relaxation must be *strictly* confined to this mode: all-fingers is the
+ * mode people already play, and the first half of this block pins its numbers
+ * so a future tweak to the index preset can't leak into it. */
+{
+  const pinned = (fingers, surface) => {
+    const d = new TapDetector();
+    d.setSurface(surface);
+    d.setFingers(fingers);
+    return d.o;
+  };
+  for (const surface of Object.keys(SURFACES)) {
+    const want = { ...DEFAULTS, ...SURFACES[surface] };
+    const got = pinned('all', surface);
+    ok(Object.keys(want).every((k) => got[k] === want[k]),
+      `all-fingers on ${surface} is exactly the tuning it always was`,
+      Object.keys(want).filter((k) => got[k] !== want[k]).join(' ') || '');
+  }
+
+  // And the relaxation is only ever a relaxation — never a different detector.
+  const air = pinned('all', 'air'), airOne = pinned('index', 'air');
+  const moved = Object.keys(air).filter((k) => air[k] !== airOne[k]);
+  ok(moved.length === 2 && moved.every((k) => airOne[k] < air[k]),
+    'index-only moves two thresholds, both downwards', `(${moved.join(', ')})`);
+
+  /* A pointing hand descends nearly as one piece. `reach` is how much of the
+   * travel is the fingertip's own, in palm spans — the quantity MIN_EXTEND
+   * gates on — with the rest carried by the hand. */
+  const lead = (reach) => oneHand((t) => {
+    const c = tapCycle(t, 0.35, { dur: 0.09, depth: 0.34 });
+    return { hand: (c / 0.34) * (0.34 - reach), depths: [0, c * (reach / 0.34), 0, 0, 0] };
+  });
+  ok(run(1.4, lead(0.05)).events.length === 1
+    && run(1.4, lead(0.05), { fingers: 'index' }).events.length === 1,
+    'a clearly-leading finger plays in either mode');
+  ok(run(1.4, lead(0.03)).events.length === 0
+    && run(1.4, lead(0.03), { fingers: 'index' }).events.length === 1,
+    'a barely-leading one plays only with index only — the 30% that was missing');
+
+  // The gate it replaces is the one keeping resting silent, so that has to
+  // survive the relaxation. A whole hand set down leads with nothing at all.
+  for (const dur of [0.12, 0.18, 0.25, 0.35]) {
+    const r = run(1.6, oneHand((t) => ({ hand: glide(t, 0.3, dur, 0.5) })), { fingers: 'index' });
+    ok(r.events.length === 0, `putting the hand down over ${dur}s is still silent`,
+      r.events.length ? `(${r.events.length} spurious)` : '');
+  }
 }
 
 /* --- playing against a desk, and against nothing at all -------------

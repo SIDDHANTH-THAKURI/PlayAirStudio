@@ -312,16 +312,39 @@ downstream works in table coordinates — u across, v away from you — and the
 overlay runs the mapping backwards, so the grid is painted *on* the desk in the
 camera's own perspective instead of floating over it.
 
-The corners are marked by **tapping** them, and that is a correctness decision.
-A homography maps exactly one plane; clicking marks the desk, but every point
-the instrument is later asked about is a *fingertip landmark*, which sits a
+The corners are placed **with the cursor** — four clicks. They were originally
+marked by *tapping* them, which is, on paper, the more correct thing to do. A
+homography maps exactly one plane; clicking marks the desk, but every point the
+instrument is later asked about is a *fingertip landmark*, which sits a
 centimetre or two above the desk even when the pad is touching. Those are two
 different planes, and the gap is parallax that grows the lower the camera sits
 and the further you reach — a laptop lid being both the worst case and the
 common one. Modelled with a pinhole camera in `test/piano.mjs`, a clicked
-calibration puts taps out by up to a fifth of the surface, which is two whole
-keys; tapping fits the homography to the plane the fingertips are actually on,
-and the error cancels to machine precision on every rig tested.
+calibration puts taps out by up to a fifth of the surface; tapping fits the
+homography to the plane the fingertips are actually on, and the error cancels
+to machine precision.
+
+It was still the wrong trade, and it is worth being precise about why, because
+the geometry above is not wrong — it just isn't the binding constraint. Placing
+a corner by tap requires the tap detector to be working *before* there is any
+calibration to tell you whether it is. A marginal corner and a marginal
+detector look identical from the outside, so the one step nobody can skip
+became the least reliable thing in the instrument, and a first run could fail
+in a way that gave the player nothing to act on. A cursor puts the corner
+exactly where it was meant, every time. The parallax is real but bounded, it
+only bites in Desk mode at all (Air, the default, has no surface under the
+fingertips), and the cure is one sentence of instruction: click where your
+*fingertips* will be, not where the desk's corner is. The pinhole test stays,
+because it is what would price a future tap-assisted refinement.
+
+**The walkthrough.** Two things here are not guessable by poking at it: that a
+note fires when the fingertip is *stopped*, so you strike rather than press,
+and that you must mark out where the keyboard is before anything sounds. Both
+are one sentence each, so the first run spends five cards saying them —
+spotlighting the real controls rather than describing them, since every step
+is something you can try while it is on screen. It hands over to calibration
+when it ends, is remembered so it greets nobody twice, and **Show me around**
+replays it.
 
 **Onset detection** is the part that decides whether this is an instrument or a
 toy, and it went through three designs — see the header of `src/piano/onset.js`
@@ -352,6 +375,22 @@ for free, since both are already tracked. A strike needs articulation of its
 own, and one arriving alongside a stronger one must be a decent fraction of it
 to count as a deliberate chord rather than a passenger. The leader always fires
 immediately — arbitration never delays a note, because this is an instrument.
+
+**Or don't ask the question.** Arbitration gets this right most of the time,
+and "most" is the reason **Play with → Index only** exists: a stray note is far
+worse than a missing one, and restricting each hand to one finger removes the
+question rather than answering it better. It is also the pose people adopt
+anyway when picking out a melody rather than playing chords, and the fingers
+that are off are drawn as faint outlines so the mode never reads as the tracker
+having lost them.
+
+It is a *detector* setting rather than a filter over its output, which is the
+part worth getting right: a finger that is not playing must not enter the
+strike machine at all, or it still joins arbitration clusters and can talk a
+real strike out of sounding — so the option that exists to stop wrong notes
+would quietly start swallowing right ones. `test/piano.mjs` pins that down by
+tapping the index alongside a much stronger middle finger and requiring the
+index to sound.
 
 **Layout.** The surface is scale-locked: each column is the next degree of a
 scale, not the next semitone, so an aim that is one column out is a neighbouring
@@ -406,68 +445,136 @@ checking before concluding the instrument feels sluggish.
 
 ## Air Drums (prototype)
 
-`drums.html`. **Point your index finger and you are holding a drumstick** —
-one in each hand. Swing at a drum and stop; the stop is the hit, and how fast
-you were moving when you got there is how hard it lands.
+`drums.html`. **Point one index finger in each hand** — or switch to a pair of
+drumsticks — and bring the tip down through a drum. It sounds right as the tip
+goes through the head, and how fast you were moving is how hard it lands.
 
-### The stick is the idea, not the decoration
+### The sticks are bolted to the fist
 
-A drum stroke is a wrist flick. The wrist itself barely travels — rotate your
-hand thirty degrees and your knuckles move almost nowhere — so watching a
-fingertip means watching the *smallest* part of the gesture. A stick is a
-lever: its tip sits a couple of palm-spans out along the hand's axis, so the
-same flick swings it several times as far and several times as fast. In
-`test/drums.mjs` a half-radian rotation moves the knuckles 0.49 spans and the
-tip 1.48. The motion the detector has to recognise is three times the motion
-the player actually makes, which is the right way round, and it is why a small
-comfortable stroke reads clearly instead of needing to be flailed.
+The first version drew each stick **along the index finger**, through the
+knuckle and the fingertip and carrying on past, and on paper that is the better
+idea: you aim the finger you can already see, rather than an invisible object
+attached to a featureless blob.
 
-It is also the aiming device. A fingertip is a point you have to imagine; a
-stick is drawn on screen, rooted in your hand, and moves exactly as a real one
-would. Pointing is what arms it — extend your index finger and you have picked
-it up, relax and you have put it down — so resting, gesturing and scratching
-your nose are all silent with no special case for any of them.
+In practice a drum stroke *bends that finger*. The index curls as the wrist
+flicks, straightens on the recovery, and drifts wherever the hand is relaxed —
+so the one line the whole geometry was built from was the line that changed
+most during the gesture, and the tip swung to places nobody aimed at. Arming
+made it worse: it required a clean point, index out and the others in, which a
+drummer's grip is not, so the common failure was no stick at all.
 
-**The stick lies along the index finger**, passing through the knuckle and the
-fingertip and carrying on past. A fist was tried first and was worse in both
-ways that matter. Visually, you are aiming an invisible object attached to a
-featureless blob rather than aiming the finger you can already see. And a
-closed hand held naturally in front of a webcam points its knuckles *at the
-camera*, so the palm axis is foreshortened to nearly nothing and its direction
-degenerates into noise — the stick flails, or the grip never registers and
-nothing works at all.
+Nothing in `src/drums/stick.js` now reads a single finger joint. Everything
+comes from the palm — wrist and the four knuckles — which is rigid: curl your
+fingers, make a fist, splay them, and those five points keep the same shape.
+`test/drums.mjs` asserts it directly, by throwing the index fingertip to the
+far corner of the frame and checking the stick does not move by so much as a
+float.
 
-Sticks are told apart by **grip tape** in each hand's colour, wrapped over the
-butt end. A coloured dot does not survive motion blur; a band along a quarter
-of the shaft does.
+**The direction went wrong twice more before it went right,** and the two dead
+ends are worth keeping because both looked correct on paper.
 
-### The lever amplifies the noise too
+A stick points where the fingers would if you opened them, so the quantity
+wanted is the hand's forward axis — wrist to knuckles. Measuring it *directly*
+fails in exactly the pose the instrument is played in: a fist held out in front
+of a camera points its knuckles at the lens, so the axis collapses to almost
+nothing in the image and its angle becomes noise. That is why a fist was
+rejected in the first place.
 
-This was the trap, and it is worth stating plainly because it is not obvious
-until the thresholds are loosened enough for the instrument to feel good.
-Putting the tip two spans out multiplies the gesture by two — and multiplies
-the tracker's jitter by two as well. Three hundredths of a span of wobble at
-the knuckle is nothing; the same wobble rocking the finger's *direction* throws
-the tip a tenth of a span, which at sixty frames a second is six spans per
-second of apparent speed. That is comfortably fast enough to look like somebody
-hitting a drum. A hand held perfectly still would play.
+**The line across the knuckles** has the opposite property — widest part of the
+hand, seen broadside, long and well defined however the wrist is turned — and
+its perpendicular is that same forward axis. So take the angle from there. But
+a perpendicular has *two ends*, and deciding which one is the tip needs the
+very measurement that just collapsed. Both attempts foundered on that one bit.
+Forcing it always downward (mapping the lean through `sin 2θ` so it faded out
+at the ambiguous angle) could not flip, and hung the stick vertically past a
+hand held at an angle — visibly not in the hand, which on an air instrument is
+not a cosmetic complaint. Taking the sign from the collapsed axis and smoothing
+it hard could flip, and did: a threshold between "trust the evidence" and "fall
+back to downward" is a discontinuity sitting exactly where the evidence is
+weakest. That is what "the sticks keep changing direction" was.
 
-So the direction is low-passed, and only the direction, because the knuckle's
-own jitter is not multiplied by anything. The detector and the drawn stick use
-*different* time constants rather than a compromise: the detector wants quiet
-and can afford two frames of lag, the drawn stick wants to stay glued to the
-finger and can afford some shimmer.
+**What works is the forward axis, straight, with no cleverness at all** — and
+being honest about the foreshortening instead of papering over it. It is a
+vector, not a line, so there is no end to choose and nothing to flip. When it
+shortens, the stick is drawn *shorter by exactly that much*, right down to
+nothing. Reliable angle, full-length stick pointing where the hand points; angle
+turning to noise, and the stick is a stub with almost nothing to swing.
 
-`test/drums.mjs` prints the resulting margin as a pair, because either number
-alone is meaningless — it is easy to catch a gentle flick, and easy to reject
-noise, and the whole problem is doing both:
+The zero matters. A floor under the length looks kinder and reinstates the bug:
+pitch a hand from pointing slightly down-and-away to slightly up-and-away and
+the axis passes through the camera line, where the direction genuinely
+reverses — so a stick with a minimum length snaps end for end there. Let it go
+to zero and the reversal is a stick shrinking to a point and growing back the
+other way, which is what a real one does. `test/drums.mjs` sweeps a hand
+through that pose and requires the tip to move no more than 0.016 spans between
+one step and the next; before, it jumped 1.6.
 
-```
-a still hand, per tracker jitter - 2%:0  3%:0  4%:0  6%:9 spurious
-smallest flick still caught      - 0.5rad:8/8  0.35rad:8/8  0.25rad:8/8  0.18rad:8/8
-```
+It also makes the aiming rule something you can see: tip your hand further down
+at the kit and the stick gets longer.
 
-An eleven-degree wrist flick plays; realistic tracker jitter does not.
+### And an instrument with no stick at all
+
+All of the above is inference. The tip of a drumstick is a point on an object
+that is not there, worked out from the shape of a hand — and every scheme for
+working it out degrades as the hand turns toward the camera, because that is
+where the information goes.
+
+A fingertip does not have that problem. It is a landmark the tracker reports
+directly, with no geometry in between. So **Fingertip** is the other way to
+play, and it is the default: point one index finger with the others tucked in,
+and the tip of it strikes exactly as it does in Air Piano. Relax the hand and
+it stops — the other fingers cannot set anything off, because the pose itself
+is the switch.
+
+Everything downstream is shared. Both modes hand the detector the same shape of
+thing, differing in the ruler they measure in (a stick's reach, or a palm span)
+and a short table of thresholds, because a tap is a smaller and quicker gesture
+than a swing. `test/drums.mjs` runs the entire stroke suite twice, once per
+mode, and the browser test plays takes in both: neither gets to be the one that
+only works in principle.
+
+### A stick is as long as the screen says, not as long as your hand
+
+Measuring the stick in palm spans is the right instinct and the wrong law. It
+keeps the stick in proportion to the hand, which is most of what makes it look
+held — and a hand's size on screen is a fact about how close somebody is
+sitting, not about how far they need to reach. Sit close enough and 1.9 hands
+is half the height of the frame: a caber, sweeping every drum at once. Sit far
+back and it is a stub that cannot reach the kit at all.
+
+The kit is drawn at fixed places on screen, so the reach that matters is
+measured in screen too. Inside the normal range the clamp changes nothing —
+a 0.12-span hand still gets exactly 1.9 spans of stick — and outside it, it is
+the difference between an instrument and a joke. Every threshold in the
+detector is then expressed in *stick reaches* rather than palm spans, for the
+same reason: a threshold in spans quietly means something different for every
+player and every seating position.
+
+**Holding is a closed hand** — curl your fingers and you have picked the sticks
+up, spread them flat and you have put them down. It is measured off all four
+fingers at once, in metric 3D when the tracker offers world landmarks, so no
+single finger can decide it and turning your hand cannot fake it. The
+thresholds sit low enough that a loose, comfortable grip counts; this gesture
+exists to put the sticks down, not to make you clench.
+
+Sticks are told apart by **grip tape** in each hand's colour, wrapped from the
+butt to a little past the fist. A coloured dot does not survive motion blur; a
+band along a third of the shaft does — and putting it where the hand closes is
+what makes the stick read as gripped rather than as glued to a wrist.
+
+### One ruler that does not shrink
+
+Every threshold here is measured in *palm spans*, so the span itself has to
+mean something. Naively it is one distance across the palm, and naively that is
+wrong: turn the hand and whichever distance you picked foreshortens, the ruler
+shrinks, and every threshold silently moves with it.
+
+World landmarks make this recoverable without assuming anything about pose.
+Each pair of palm points has a known real length, so each gives an estimate of
+the image scale — and a foreshortened pair can only ever read *short*. The
+largest estimate is therefore the one from whichever pair happens to be side-on
+to the camera, which is the true scale. Squashing a synthetic hand to 35% of
+its width in `test/drums.mjs` moves the measured span by under 1%.
 
 ### No calibration, deliberately
 
@@ -482,55 +589,123 @@ page, press start, and play.
 The first layout spread the drums corner to corner, the way a photograph of a
 kit does, and several of them turned out to be **physically unreachable**.
 
-The stick tip hangs a couple of spans out along a hand that points down and
-forward, so the region the tip can occupy is offset well *below* wherever your
-hands are comfortable — roughly the lower two-thirds of the frame. Putting the
-cymbals near the top edge meant reaching them required holding your hands above
-the frame entirely. It read as the instrument being broken, and it was.
+The stick tip hangs a couple of spans below the fist, so the region the tip can
+occupy is offset well *below* wherever your hands are comfortable — roughly the
+lower two-thirds of the frame. Putting the cymbals near the top edge meant
+reaching them required holding your hands above the frame entirely. It read as
+the instrument being broken, and it was.
 
 So the kit sits lower and narrower than a photograph would: cymbals at the top
 of the reachable band, snare and floor at the bottom of it, kick below them.
-The catch margin around each pad is generous enough that the pads' areas meet,
-because a stroke landing in the gap between two drums is not a mistake worth
-punishing — it is a stroke aimed at one of them, and swallowing it teaches
-nothing except that the instrument is unreliable.
 
-### Say what you are about to hit
+Each pad then carries two geometries. The **head** is what is drawn. The
+**zone** is a larger and especially a *taller* ellipse around it, and zones
+decide only which drum you are aiming at, never whether you hit anything. They
+are stretched vertically rather than evenly because a kit is a couple of rows of
+drums with a lot of air between them, so the gaps that swallow strokes are the
+vertical ones. `test/drums.mjs` walks the line joining every adjacent pair of
+pads — 246 sample points — and requires that not one of them belongs to no
+drum.
+
+### Say what you are about to hit, and whether you could
 
 The drum under each raised stick is **ringed in that hand's colour**, before any
 stroke. Without it, aiming is guesswork you only get feedback on after
 committing: you swing, something else sounds, and there is no way to learn where
-the edges are. With it the kit answers continuously to where the tip is, and
-hitting the drum you meant becomes something you can see rather than something
-you find out afterwards.
+the edges are.
 
-### Detection
+The ring says two things, because a stroke needs two. Solid, with the drum's
+surface drawn as a bright line across it, means the tip is above that line and a
+stroke will land. Faint and dashed means the tip is already *below* it and has
+to come back up first — which is the one state that would otherwise be a silent
+mystery, since everything looks right and nothing sounds.
 
-The same principle as the piano's tap detector — accelerate, then stop
-abruptly, and the hit belongs on the stop — with three differences that all
-follow from playing with a stick:
+### Detection: contact, not braking
 
-- **One point per hand, not five.** A stick has one tip, so all the machinery
-  for deciding which of five fingers actually struck is simply not needed.
-- **No articulation test.** The piano rejects strokes where the fingertip moved
-  no more than its palm, because a hand being put down is not a note. Drumming
-  is the opposite — the whole hand *should* move. Pointing takes over that job.
-- **Bigger numbers**, scaled to the tip's leverage.
+The first detector borrowed the piano's tap logic — accelerate, then stop
+abruptly, and the hit belongs on the stop — and it was the wrong question twice
+over.
 
-The learned approach axis is also much weaker here than in the piano, and that
-is deliberate. The piano's taps all go the same way — down onto one plane — so
-learning that direction is free accuracy. Drum strokes go to seven different
-places, and an axis fitted to the last one *penalises* the next: reach left for
-the hi-hat and a stroke down onto the floor tom projects short, reading as
-softer than it was or missing entirely. The only thing worth learning is the
-small standing tilt of a camera that is not level.
+**It was late by construction.** A stop can only be recognised after it has
+happened: the detector had to watch the speed fall to roughly half its peak, and
+in mid-air a hand takes something like a tenth of a second to brake. That is a
+tenth of a second of latency no tuning could remove, on the one instrument where
+timing is the entire performance. **And it was fragile** — a stroke had to clear
+an approach speed, then a peak, then a travel distance, then decelerate by the
+right ratio inside a window, all before a timeout. Five gates in series, each
+with its own way of quietly dropping a stroke you definitely played.
 
-One thing worth calling out because it was a bug: requiring the stick to be
-seen *lifting* before it can hit again is correct drumming, but on its own it
-means a single unseen recovery — an occluded hand, a dropped frame, a player
-who drifts back up too gently to measure — takes that stick out of service
-permanently. A dead hand is a far worse failure than an extra hit, so the
-re-arm also times out (`REARM_MAX`).
+The question is now simply **did the tip come down through a drum?** Each pad
+has a surface just above its centre, and a hit is the tip crossing that surface
+downward with some speed behind it. It fires on the frame the crossing happens
+rather than a tenth of a second after the fact, and there is one gate left, on a
+quantity the player can see.
+
+Because the crossing sits *between* two samples, the exact moment is
+interpolated and the hit is placed there rather than at whenever the tracker
+happened to look. That matters more than it sounds: at twenty-five looks a
+second the difference is up to forty milliseconds, applied at random, which is
+precisely what makes a steady roll sound drunk. The same stroke sampled at 20 fps
+and at 120 fps lands 2.2 ms apart in `test/drums.mjs`, on samples 50 ms apart.
+`main.js` then holds a 22 ms budget so each hit can be scheduled at its true
+moment — constant latency is something a player adapts to in seconds, jitter is
+something nobody ever adapts to.
+
+What is lost is worth naming. A stroke swung at a gap between two drums used to
+be caught by a nearest-pad search and played anyway; now it plays nothing. The
+zones above are sized so those gaps barely exist inside the kit, and the ring
+makes a miss something you can see coming rather than discover afterwards.
+
+**Rearming is a lift, and it is measured as travel.** Coming back up is what
+reloads the stroke, which is how drumming works anyway. The subtle part is that
+it cannot be "above the surface": the kit is a staircase of surfaces at
+different heights, so rearming against whichever drum the tip currently happens
+to be over lets one long swing down the frame sound every drum it passes — it
+goes through the hi-hat and is immediately "above" the snare's lower surface,
+and fires again. Measuring upward travel from the lowest the tip has been fixes
+it, and `test/drums.mjs` sweeps a stick down the whole frame to prove one swing
+sounds one drum.
+
+The timeout matters too, and it was a bug once: requiring the lift and nothing
+else means a single unseen recovery — an occluded hand, a dropped frame, a
+player who drifts back up too gently to measure — takes that stick out of
+service permanently. A dead hand is a far worse failure than an extra hit, so
+the rearm also times out (`SLACK`).
+
+`test/drums.mjs` prints the resulting margin as a pair, because either number
+alone is meaningless — it is easy to catch a gentle stroke, and easy to reject
+noise, and the whole problem is doing both:
+
+```
+a hand resting on a drum, per tracker jitter - 2%:0  3%:0  4%:0  6%:0 spurious
+slowest stroke still caught                  - 0.2s:8/8  0.35s:8/8  0.5s:8/8  0.8s:5/8
+caught per tracking rate — 60fps:4/4  45fps:4/4  30fps:4/4  20fps:4/4  15fps:4/4
+```
+
+An unhurried half-second stroke plays; a hand resting *on* a drum with 6% jitter
+does not; and because contact is caught on the frame it happens rather than
+after the stroke finishes braking, a slow tracker now costs timing rather than
+whole strokes.
+
+### Smooth at sixty, tracked at twenty
+
+Landmarks arrive whenever inference finishes — on a laptop twenty-something
+times a second, and never evenly. The canvas paints sixty times a second.
+Drawing the latest sample means the stick stands still and then jumps, and the
+eye reads that as the *instrument* being slow even when the detection underneath
+is fine.
+
+So the drawn stick follows the tracked one through a critically damped spring,
+evaluated every frame. It costs a few milliseconds of visual lag and buys none
+of it back in timing: contact is measured off the raw tip, and flashes are
+scheduled against the audio clock, so neither goes anywhere near it. The tracker
+also gives up the last tenth of its duty cycle, because at a duty of 1 the main
+thread never leaves MediaPipe and there is nothing left to paint with.
+
+One rule holds the whole thing together: the stick that is drawn is built from
+the *detector's own* filtered pose, not recomputed alongside it. Two filters on
+the same landmarks drift apart, and when they do the stick you aim with is not
+the stick that hits — unplayable, and very hard to diagnose from outside.
 
 ### The kit
 
@@ -601,6 +776,7 @@ src/piano/onset.js      tap detection — the strike-signature state machine
 src/piano/scales.js     scale-locked note layout across the surface
 src/piano/piano-worklet.js  modal struck-string synthesis
 src/piano/audio.js      Tone chain for the piano
+src/piano/tour.js       the first-run walkthrough, and where it points
 src/piano/render.js     overlay drawn onto the calibrated desk
 src/piano/main.js       piano wiring, calibration UI, settings
 drums.html / drums.css  Air Drums: markup and its few theme additions
@@ -639,7 +815,7 @@ node test/smoke.mjs       # real Chromium + fake webcam over CDP: shelf, tutoria
 # piano
 node test/piano.mjs       # homography, tap detection at controlled sample rates, scales
 node test/piano-dsp.mjs   # inharmonicity, per-partial decay, two-stage decay, velocity as brightness
-node test/piano-smoke.mjs # boot, tap-calibration, then the whole path with a scripted hand
+node test/piano-smoke.mjs # boot, walkthrough, calibration, then the whole path with a scripted hand
 
 # drums
 node test/drums.mjs       # stick geometry and leverage, kit hit-testing, stroke detection

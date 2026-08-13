@@ -8,12 +8,13 @@
  * Three things do most of that work.
  *
  * **The sticks are rendered as objects, not as cursors.** A tapered wooden
- * shaft with a turned tip, drawn along the *index finger* — through the
- * knuckle and the fingertip, carrying on past — with a shadow cast onto the
- * kit below and a motion trail that stretches with speed. They appear when you
- * point and are lowered when you relax, so picking them up and putting them
- * down is something you *see*, not something you read in a status line. That
- * single detail is what turns a tracked hand into a player.
+ * shaft with a turned tip, gripped in the fist — butt poking back out of the
+ * hand, shaft running down through the fingers and on toward the kit — with a
+ * shadow cast onto the drums below and a motion trail that stretches with
+ * speed. They appear when you close your hand and are lowered when you open it,
+ * so picking them up and putting them down is something you *see*, not
+ * something you read in a status line. That single detail is what turns a
+ * tracked hand into a player.
  *
  * **The kit is drawn as drums.** Each pad is an ellipse — a drum head seen from
  * a player's angle — with a rim, lugs, a shell edge beneath it, and shading
@@ -35,9 +36,18 @@
  * is, and hitting the drum you meant becomes something you can see rather than
  * something you find out.
  *
+ * The ring says two things at once, because a stroke needs two. Solid, with the
+ * drum's surface drawn as a bright line across it, means the tip is above that
+ * line and a stroke would land. Faint and dashed, with no line, means the tip
+ * is already below it and has to come back up first — which is the one state
+ * that would otherwise be a silent mystery, since everything looks right and
+ * nothing sounds.
+ *
  * Everything here works in normalised coordinates multiplied by the canvas
  * size, so it lines up with the video underneath at any aspect ratio.
  */
+import { SURFACE } from './kit.js';
+
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const TAU = Math.PI * 2;
@@ -168,7 +178,11 @@ export class Overlay {
      * stamped over the top of whatever ends up in front of it. */
     const aimed = new Map();
     for (const st of f.sticks || []) {
-      if (st.hold > 0.35 && st.over) aimed.set(st.over, HAND_COL[st.id] || '#C0631A');
+      if (st.hold <= 0.35 || !st.over) continue;
+      const was = aimed.get(st.over);
+      // Two sticks over one drum: whichever of them could actually play it wins
+      // the ring, since that is the thing the ring is there to tell you.
+      if (!was || (st.armed && !was.armed)) aimed.set(st.over, { col: HAND_COL[st.id] || '#C0631A', armed: !!st.armed });
     }
 
     // Far drums first, so the near ones overlap them the way a real kit stacks.
@@ -184,25 +198,56 @@ export class Overlay {
       if (pad.id === 'hihat') this._hats(ctx, pad, cx, cy, rx, ry, lit, f);
       else if (isCymbal(pad.id)) this._cymbal(ctx, pad, cx, cy, rx, ry, lit, f);
       else this._drum(ctx, pad, cx, cy, rx, ry, lit, f);
-      const col = aimed.get(pad.id);
-      if (col) this._aim(ctx, cx, cy, rx, ry, col, f.now);
+      const a = aimed.get(pad.id);
+      if (a) this._aim(ctx, cx, cy, rx, ry, a, f.now);
     }
     this._ripples(f);
     if (f.labels) for (const pad of pads) this._label(ctx, pad, w, h);
   }
 
-  /** "This is the one you would hit." A ring just outside the rim, breathing. */
-  _aim(ctx, cx, cy, rx, ry, col, now) {
-    const pulse = 0.72 + 0.28 * Math.sin(now * 5);
+  /**
+   * "This is the one you would hit" — and, just as importantly, whether you
+   * could hit it from where the stick currently is. See the header.
+   */
+  _aim(ctx, cx, cy, rx, ry, { col, armed }, now) {
     ctx.save();
-    ctx.globalAlpha = 0.34 + 0.20 * pulse;
-    ctx.strokeStyle = col;
-    ctx.lineWidth = Math.max(2, ry * 0.16);
-    ctx.setLineDash([Math.max(6, rx * 0.16), Math.max(5, rx * 0.13)]);
-    ctx.lineDashOffset = -now * 26;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx * 1.12, ry * 1.16, 0, 0, TAU);
-    ctx.stroke();
+    if (armed) {
+      ctx.globalAlpha = 0.62 + 0.18 * Math.sin(now * 5);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(2.2, ry * 0.20);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx * 1.12, ry * 1.16, 0, 0, TAU);
+      ctx.stroke();
+
+      /* The surface itself, drawn where `kit.js` puts it. An air instrument has
+       * no object to make contact with, so the line a stroke has to come down
+       * through is otherwise invisible — and a rule you cannot see is a rule
+       * you have to be told, repeatedly, and still get wrong. */
+      const ly = cy - ry * SURFACE;
+      const half = rx * Math.sqrt(Math.max(0, 1 - SURFACE * SURFACE));
+      const g = ctx.createLinearGradient(cx - half, 0, cx + half, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.5, col);
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = g;
+      ctx.lineWidth = Math.max(1.6, ry * 0.11);
+      ctx.beginPath();
+      ctx.moveTo(cx - half, ly);
+      ctx.lineTo(cx + half, ly);
+      ctx.stroke();
+    } else {
+      // Below the surface: aimed at this drum, but the stick has to come up
+      // before it can come down again.
+      ctx.globalAlpha = 0.26;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(1.4, ry * 0.11);
+      ctx.setLineDash([Math.max(5, rx * 0.13), Math.max(5, rx * 0.13)]);
+      ctx.lineDashOffset = -now * 26;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx * 1.12, ry * 1.16, 0, 0, TAU);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -321,11 +366,17 @@ export class Overlay {
   /**
    * The hi-hat, as the two discs it actually is.
    *
-   * Which one you strike is what decides open or closed — there is no foot
-   * pedal to work with here — so the split has to be *visible* or it is a rule
-   * the player has to be told rather than something they can see. Striking the
-   * top disc lifts it, and it settles back down over the next second, so the
-   * hat looks open for as long as it sounds open.
+   * Where across it you strike is what decides open or closed — there is no
+   * foot pedal to work with here, and every stroke arrives over the top of the
+   * head, so up-and-down carries no information to read. Through the middle is
+   * the closed hat, out at either edge is the open one, which also means the
+   * ride's bell-to-bow gradient and the hat's tight-to-washy one are the same
+   * gesture on both cymbals.
+   *
+   * The edges are therefore banded, because otherwise it is a rule the player
+   * has to be told rather than something they can see. An open hit lifts the
+   * top disc and it settles back down over the next second, so the hat looks
+   * open for as long as it sounds open.
    */
   _hats(ctx, pad, cx, cy, rx, ry, lit, f) {
     let gap = 0;
@@ -337,7 +388,22 @@ export class Overlay {
     gap = clamp(gap, 0, 1);
     const lift = ry * (0.34 + 1.05 * gap);
     this._cymbal(ctx, pad, cx, cy + ry * 0.34, rx * 0.94, ry * 0.94, lit * 0.55, f, { stand: true });
-    this._cymbal(ctx, pad, cx, cy - lift * 0.5, rx, ry, lit, f, { stand: false });
+    const top = cy - lift * 0.5;
+    this._cymbal(ctx, pad, cx, top, rx, ry, lit, f, { stand: false });
+
+    // The open edges: the outer fifth on each side, marked just enough to be
+    // findable without turning the cymbal into a diagram.
+    ctx.save();
+    ctx.globalAlpha = 0.30 + lit * 0.28 + gap * 0.3;
+    ctx.strokeStyle = 'rgba(255,236,186,.95)';
+    ctx.lineWidth = Math.max(1.6, ry * 0.16);
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(cx, top, rx * 0.97, ry * 0.97, 0,
+        dir > 0 ? -0.42 : Math.PI - 0.42, dir > 0 ? 0.42 : Math.PI + 0.42);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /** How much a cymbal is still moving — decays slower than the head flash. */
@@ -409,7 +475,85 @@ export class Overlay {
    *  The sticks
    * ================================================================ */
   _sticks(f) {
-    for (const s of f.sticks || []) this._stick(s, f);
+    for (const s of f.sticks || []) {
+      if (s.stick?.mode === 'finger') this._finger(s, f); else this._stick(s, f);
+    }
+  }
+
+  /**
+   * Fingertip mode.
+   *
+   * Nothing is invented here, and the drawing says so: a sleeve along the
+   * finger the player is actually pointing with, and a bead on the tip that is
+   * a landmark rather than a projection. It brightens and grows with speed, and
+   * it carries the same trail a stick tip does, because the one thing the
+   * player needs to see is where the striking point is and how fast it is
+   * going — which is exactly what the detector is watching.
+   */
+  _finger(s, f) {
+    const { ctx, w, h } = this;
+    const st = s.stick;
+    if (!st) return;
+    const col = HAND_COL[s.id] || '#C0631A';
+    const up = s.hold;
+    if (up < 0.02) return;
+    const hot = clamp((s.speed - 1.2) / 9, 0, 1);
+
+    const gx = st.grip.x * w, gy = st.grip.y * h;
+    const tx = st.tip.x * w, ty = st.tip.y * h;
+    const wide = clamp((st.unit * w) / 11, 3, 16);
+
+    ctx.save();
+    ctx.globalAlpha = up;
+
+    if (s.speed > 0.7) {
+      const stretch = clamp(s.speed / 10, 0, 1);
+      ctx.strokeStyle = col;
+      for (let i = 3; i >= 1; i--) {
+        const k = (i / 3) * stretch * 1.6;
+        ctx.globalAlpha = up * stretch * (0.28 / i);
+        ctx.lineWidth = wide * (0.5 + i * 0.35);
+        ctx.beginPath();
+        ctx.moveTo(tx - s.vel.x * w * k, ty - s.vel.y * h * k);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = up;
+    }
+
+    // The finger itself, sleeved from knuckle to tip — enough to read as "this
+    // finger is the one that plays" without drawing a hand over the player's.
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = up * 0.32;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = wide * 0.9;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+
+    const bead = wide * (0.62 + hot * 0.22);
+    ctx.globalAlpha = up * (s.armed ? 0.30 + hot * 0.42 : 0.14);
+    const glow = ctx.createRadialGradient(tx, ty, bead * 0.3, tx, ty, bead * 3.2);
+    glow.addColorStop(0, col);
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(tx, ty, bead * 3.2, 0, TAU);
+    ctx.fill();
+
+    ctx.globalAlpha = up;
+    ctx.beginPath();
+    ctx.arc(tx, ty, bead, 0, TAU);
+    const g = ctx.createRadialGradient(tx - bead * 0.35, ty - bead * 0.35, bead * 0.15, tx, ty, bead);
+    g.addColorStop(0, '#FFF6E6');
+    g.addColorStop(1, col);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = 'rgba(52,34,16,.55)';
+    ctx.stroke();
+    ctx.restore();
   }
 
   _stick(s, f) {
@@ -422,31 +566,41 @@ export class Overlay {
      * gesture is legible without a word of instruction. */
     const up = s.hold;
     if (up < 0.02) return;
-    const drop = (1 - up) * st.span * 0.55;
+    const drop = (1 - up) * st.reach * 0.30;
+    const hot = clamp((s.speed - 1.6) / 12, 0, 1);   // how fast it is travelling
 
     const bx = st.butt.x * w, by = (st.butt.y + drop) * h;
     const tx = st.tip.x * w, ty = (st.tip.y + drop) * h;
-    const gx = st.grip.x * w, gy = (st.grip.y + drop) * h;
     const len = Math.hypot(tx - bx, ty - by);
     if (!(len > 4)) return;
     const ux = (tx - bx) / len, uy = (ty - by) / len;
     const px = -uy, py = ux;                       // across the stick
-    const wide = clamp(st.span * w * 0.085, 2.2, 7);
+    // Thickness follows the stick's own length, not the hand's size: a real 5A
+    // is about 400mm of wood at 14mm across, and holding that ratio is what
+    // keeps it reading as a turned piece of hickory at any distance.
+    const wide = clamp((st.reach * w) / 26, 2.6, 13);
 
     ctx.save();
     ctx.globalAlpha = up;
 
-    // Trail: the stick's recent path, stretched by how fast it is moving. This
-    // is what makes a hard stroke *look* hard before you hear it.
-    if (s.speed > 1.2) {
-      const stretch = clamp(s.speed / 26, 0, 1);
-      ctx.globalAlpha = up * stretch * 0.34;
+    /* Trail: where the tip has just been, smeared back along its travel. This
+     * is what makes a hard stroke *look* hard before you hear it, so it is
+     * built out of several fading passes rather than one flat streak — a single
+     * translucent line reads as a graphic, a gradient of them reads as speed. */
+    if (s.speed > 0.65) {
+      const stretch = clamp(s.speed / 14, 0, 1);
+      const back = { x: s.vel.x * w, y: s.vel.y * h };
       ctx.strokeStyle = col;
-      ctx.lineWidth = wide * 1.7;
-      ctx.beginPath();
-      ctx.moveTo(gx - s.vel.x * w * 0.55, gy - s.vel.y * h * 0.55);
-      ctx.lineTo(tx, ty);
-      ctx.stroke();
+      ctx.lineCap = 'round';
+      for (let i = 3; i >= 1; i--) {
+        const k = (i / 3) * stretch * 1.5;
+        ctx.globalAlpha = up * stretch * (0.30 / i);
+        ctx.lineWidth = wide * (0.9 + i * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(tx - back.x * k, ty - back.y * k);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+      }
       ctx.globalAlpha = up;
     }
 
@@ -472,19 +626,31 @@ export class Overlay {
     ctx.lineTo(bx - px * wb, by - py * wb);
     ctx.closePath();
     const grain = ctx.createLinearGradient(bx + px * wb, by + py * wb, bx - px * wb, by - py * wb);
-    grain.addColorStop(0, '#7A5228');
-    grain.addColorStop(0.34, '#D9A867');
-    grain.addColorStop(0.62, '#B98544');
-    grain.addColorStop(1, '#6B4520');
+    grain.addColorStop(0, '#5C3A18');
+    grain.addColorStop(0.26, '#C08C46');
+    grain.addColorStop(0.46, '#EBC489');
+    grain.addColorStop(0.70, '#A9762F');
+    grain.addColorStop(1, '#4E3115');
     ctx.fillStyle = grain;
     ctx.fill();
     ctx.strokeStyle = 'rgba(52,34,16,.55)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
+    // A rim light down one side. One line, and it is most of what stops the
+    // shaft reading as a flat brown polygon.
+    ctx.globalAlpha = up * 0.5;
+    ctx.strokeStyle = 'rgba(255,242,214,.75)';
+    ctx.lineWidth = Math.max(1, wide * 0.22);
+    ctx.beginPath();
+    ctx.moveTo(bx + px * wb * 0.62, by + py * wb * 0.62);
+    ctx.lineTo(tx + px * wt * 0.62, ty + py * wt * 0.62);
+    ctx.stroke();
+    ctx.globalAlpha = up;
+
     // The turned tip — an acorn bead, which is the silhouette that says
     // "drumstick" rather than "pencil".
-    const bead = wide * 1.32;
+    const bead = wide * 1.45;
     ctx.beginPath();
     ctx.ellipse(tx, ty, bead, bead * 0.86, Math.atan2(uy, ux), 0, TAU);
     const bg = ctx.createRadialGradient(tx - ux * bead * 0.3, ty - uy * bead * 0.3, bead * 0.15, tx, ty, bead);
@@ -499,8 +665,13 @@ export class Overlay {
      * Drummers really do tape their grips, and it solves the one thing a pair
      * of identical wooden sticks cannot: at a glance, across a moving frame,
      * which stick is which hand. A small coloured dot does not survive motion
-     * blur; a band along a quarter of the shaft does. */
-    const wrap = 0.26;
+     * blur; a band along a third of the shaft does.
+     *
+     * It runs from the butt to a little past the fist, which is not decoration:
+     * it is the band the hand closes around, so it puts the *held* part of the
+     * stick exactly where the hand is and the stick reads as gripped rather
+     * than as stuck to a wrist. */
+    const wrap = 0.34;
     const mx = bx + (tx - bx) * wrap, my = by + (ty - by) * wrap;
     const ww = lerp(wb, wt, wrap);
     ctx.beginPath();
@@ -516,16 +687,30 @@ export class Overlay {
     ctx.strokeStyle = 'rgba(255,250,242,.9)';
     ctx.lineWidth = 1;
     ctx.stroke();
+
+    // Where the tape ends, which is the detail that makes it read as wrapped on
+    // rather than as a colour change in the wood.
+    ctx.globalAlpha = up * 0.55;
+    ctx.strokeStyle = 'rgba(255,252,246,.85)';
+    ctx.lineWidth = Math.max(1, wide * 0.18);
+    ctx.beginPath();
+    ctx.moveTo(mx + px * ww, my + py * ww);
+    ctx.lineTo(mx - px * ww, my - py * ww);
+    ctx.stroke();
     ctx.globalAlpha = up;
 
     /* A soft halo at the tip whenever it is over a drum. The drum itself is
      * ringed too — this end of it says *which stick* is doing the aiming, which
-     * matters the moment both are over the same one. */
+     * matters the moment both are over the same one. It brightens with speed,
+     * so a stick that is committed to a stroke looks it. */
     if (s.over) {
-      ctx.globalAlpha = up * 0.42;
+      const g = ctx.createRadialGradient(tx, ty, bead * 0.4, tx, ty, bead * (2.2 + hot * 1.4));
+      g.addColorStop(0, col);
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.globalAlpha = up * (s.armed ? 0.34 + hot * 0.4 : 0.16);
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(tx, ty, bead * 2.2, 0, TAU);
-      ctx.fillStyle = col;
+      ctx.arc(tx, ty, bead * (2.2 + hot * 1.4), 0, TAU);
       ctx.fill();
     }
     ctx.restore();
@@ -537,7 +722,7 @@ export class Overlay {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.font = '600 15px Inter, ui-sans-serif, system-ui, sans-serif';
-    const msg = f.hint || 'Point your index finger to pick up a stick';
+    const msg = f.hint || 'Close your hands to pick up the sticks';
     ctx.fillStyle = 'rgba(28,20,14,.45)';
     ctx.fillText(msg, w / 2 + 1, h * 0.12 + 1);
     ctx.fillStyle = 'rgba(255,250,242,.92)';

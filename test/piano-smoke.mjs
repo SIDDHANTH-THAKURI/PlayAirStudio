@@ -127,13 +127,35 @@ try {
   ok(Math.abs(shape.vid - shape.box) < 0.02, 'stage box matches the camera frame',
     `${shape.vid.toFixed(3)} vs ${shape.box.toFixed(3)}`);
 
+  /* ---- the first-run walkthrough ---- */
+  console.log('\nwalkthrough');
+  ok(await evl(`!document.getElementById('tour').hidden`), 'a first visit is walked through it');
+  ok(await evl(`document.getElementById('calBar').hidden`),
+    'and calibration waits its turn rather than opening underneath');
+  const step = () => evl(`document.getElementById('tourCard').querySelector('.tour-of').textContent`);
+  ok(/^1 of \d/.test(await step()), 'it starts at the first card', `→ "${await step()}"`);
+  // Walk it the way a first-time player would: forwards, to the end.
+  const cards = Number((await step()).split(' of ')[1]);
+  ok(cards >= 4, 'and there is a walkthrough to walk', `(${cards} cards)`);
+  for (let i = 1; i < cards; i++) {
+    await evl(`document.getElementById('tourCard').querySelector('[data-act="next"]').click(); true`);
+    await sleep(90);
+  }
+  ok(new RegExp(`^${cards} of ${cards}`).test(await step()), 'Next reaches the last card');
+  await evl(`document.getElementById('tourCard').querySelector('[data-act="next"]').click(); true`);
+  await sleep(400);      // the settings write is debounced
+  ok(await evl(`document.getElementById('tour').hidden`), 'and finishing closes it');
+  ok(await evl(`JSON.parse(localStorage.getItem('air-piano.v1')||'{}').toured === true`),
+    'a visitor who has seen it is remembered');
+
   /* ---- calibration ---- */
   console.log('\ncalibration');
-  // First run has no stored corners, so marking out the desk opens by itself.
-  ok(await evl(`!document.getElementById('calBar').hidden`), 'a first visit opens calibration unprompted');
+  // No stored corners, so the walkthrough hands straight over to marking out.
+  ok(await evl(`!document.getElementById('calBar').hidden`),
+    'finishing the walkthrough opens calibration');
   ok(await evl(`document.getElementById('calUse').disabled`), 'and will not accept an unfinished quad');
-  ok(/tap the far left/i.test(await evl(`document.getElementById('calHint').textContent`)),
-    'and asks for the corners to be tapped, in order',
+  ok(/click the far left/i.test(await evl(`document.getElementById('calHint').textContent`)),
+    'and asks for the corners to be clicked, in order',
     `→ "${(await evl(`document.getElementById('calHint').textContent`)).trim()}"`);
   ok(/in the air/i.test(await evl(`document.getElementById('calHint').textContent`)),
     'air is the default, so that is what it asks for');
@@ -147,13 +169,25 @@ try {
   await sleep(200);
   ok(await evl(`airPiano.detector.surface === 'air'`), 'and back again');
 
+  /* One finger per hand, for anyone whose neighbouring fingers keep coming down
+   * with the one they meant. It has to reach the *detector* rather than filter
+   * its output — see FINGER_SETS — so that is what is checked. */
+  ok(await evl(`airPiano.detector.fingerSet === 'all'`), 'all ten fingers play by default');
+  await evl(`[...document.getElementById('segFingers').children].find(b => b.dataset.v === 'index').click(); true`);
+  await sleep(200);
+  ok(await evl(`airPiano.detector.fingerSet === 'index' && airPiano.detector.plays(1) && !airPiano.detector.plays(2)`),
+    'switching to index only takes the other fingers out of the detector');
+  await evl(`[...document.getElementById('segFingers').children].find(b => b.dataset.v === 'all').click(); true`);
+  await sleep(200);
+  ok(await evl(`airPiano.detector.fingerSet === 'all'`), 'and back again');
+
   const click = async (fx, fy) => {
     await evl(`(() => { const s = document.getElementById('stage'), r = s.getBoundingClientRect();
       s.dispatchEvent(new MouseEvent('click', { clientX: r.left + r.width * ${fx}, clientY: r.top + r.height * ${fy}, bubbles: true }));
     })(); true`);
     await sleep(60);
   };
-  // Clicking is the documented fallback, so it has to keep working.
+  // Clicking is how the area is marked out, so it has to keep working.
   await click(0.30, 0.34); await click(0.70, 0.34);
   ok(await evl(`document.getElementById('calUse').disabled`), 'two corners is still not a surface');
   await click(0.93, 0.86); await click(0.07, 0.86);
@@ -164,6 +198,16 @@ try {
   ok(await evl(`airPiano.plane.ok === true`), 'the desk is calibrated');
   ok(await evl(`(JSON.parse(localStorage.getItem('air-piano.v1')||'{}').corners||[]).length === 4`),
     'and remembered for next time');
+
+  // Anyone can ask for the walkthrough back, and skipping out of a replay must
+  // not disturb a surface that is already marked out.
+  await evl(`document.getElementById('tourBtn').click(); true`);
+  await sleep(150);
+  ok(await evl(`!document.getElementById('tour').hidden`), 'the walkthrough can be replayed on demand');
+  await evl(`document.getElementById('tourCard').querySelector('[data-act="skip"]').click(); true`);
+  await sleep(200);
+  ok(await evl(`document.getElementById('tour').hidden && document.getElementById('calBar').hidden`),
+    'and skipping a replay leaves a calibrated surface alone');
 
   // Perspective is real: the far edge occupies fewer pixels than the near one.
   const edges = await evl(`(() => { const p = airPiano.plane;
@@ -323,29 +367,30 @@ try {
   let stalled = false;
   const pok = (c, m, x = '') => { if (!stalled) ok(c, m, x); };
 
-  /* Tapping the corners is the primary calibration route, and the reason the
-   * instrument lands where you aim: it fits the homography to the plane the
-   * fingertips are actually on rather than to the desk beneath them. Now that
-   * a scripted hand exists, drive that path for real. */
+  /* Marking out the area is cursor-only. Hands are still tracked while it is
+   * open — the overlay goes on showing them — but no strike may sound, or
+   * waving over the area you are marking plays through a keyboard that isn't
+   * defined yet. Now that a scripted hand exists, check that for real. */
   await evl(`document.getElementById('calBtn').click(); true`);
   await sleep(300);
   ok(await evl(`!document.getElementById('calBar').hidden`), 'calibration can be reopened');
-  const cornerTaps = [
+  const cal = await play([
     { at: 0.0, hard: true, ix: 0.28, iy: 0.36 },
     { at: 1.4, hard: true, ix: 0.72, iy: 0.36 },
     { at: 2.8, hard: true, ix: 0.90, iy: 0.84 },
-    { at: 4.2, hard: true, ix: 0.10, iy: 0.84 },
-  ];
-  const cal = await play(cornerTaps, 6.2);
-  const marked = await evl(`airPiano.S ? document.getElementById('calHint').textContent : ''`);
-  ok(cal.notes.length === 0, 'tapping during calibration marks corners instead of playing notes',
+  ], 4.4);
+  ok(cal.notes.length === 0, 'tapping while marking out the area plays nothing',
     `(${cal.notes.length} stray notes)`);
+  ok(await evl(`airPiano.draft.length === 0`),
+    'and places no corners either — the cursor is the only way in');
+  await click(0.28, 0.36); await click(0.72, 0.36);
+  await click(0.90, 0.84); await click(0.10, 0.84);
   const placed = await evl(`(() => { const b = document.getElementById('calUse'); return !b.disabled; })()`);
-  ok(placed, 'four tapped corners make an acceptable surface', `hint: "${marked.trim()}"`);
+  ok(placed, 'four clicked corners make an acceptable surface');
   if (placed) {
     await evl(`document.getElementById('calUse').click(); true`);
     await sleep(400);
-    ok(await evl(`airPiano.plane.ok === true`), 'a tap-calibrated desk is usable');
+    ok(await evl(`airPiano.plane.ok === true`), 'and the re-marked surface is usable');
   } else {
     await evl(`document.getElementById('calCancel').click(); true`);
   }

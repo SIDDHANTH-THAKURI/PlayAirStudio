@@ -1,7 +1,7 @@
-/** main.js — wiring: camera → tracking → stroke detection → drums → audio + UI. */
+/** main.js — wiring: camera → tracking → contact detection → drums → audio + UI. */
 import { Tracker, Camera } from '../tracking.js';
 import { StickDetector } from './onset.js';
-import { StickFilter, LENGTH } from './stick.js';
+import { stickFrom, fingerFrom, STICK, FINGER, LENGTH } from './stick.js';
 import { Kit } from './kit.js';
 import { DrumEngine, LOOKAHEAD } from './audio.js';
 import { Overlay, HAND_COL } from './render.js';
@@ -17,10 +17,15 @@ const el = {
 };
 
 /* ---------------- persisted state ---------------- */
-/* v2: the kit moved and the stick lengths changed, so a stored v1 setting
- * would describe a layout that no longer exists. */
-const KEY = 'air-drums.v2';
+/* v4: there are two ways to play now, and the sticks changed shape again, so a
+ * stored v3 setting describes an instrument that no longer exists. */
+const KEY = 'air-drums.v4';
 const DEFAULTS = {
+  /* Fingertip by default. A stick has to have its direction *inferred* from the
+   * hand, and every way of doing that is a projection that degrades as the hand
+   * turns; a fingertip is a landmark the tracker hands over directly. The
+   * sticks look better and the fingertip plays better, and playing wins. */
+  mode: FINGER,
   size: 1, lefty: false, reach: LENGTH,
   vol: 0.8, room: 0.22, labels: true, camId: '',
 };
@@ -32,6 +37,7 @@ function load() {
       for (const k of Object.keys(DEFAULTS)) if (raw[k] !== undefined) S[k] = raw[k];
     }
   } catch {}
+  if (S.mode !== STICK && S.mode !== FINGER) S.mode = FINGER;
   return S;
 }
 let saveT = 0;
@@ -49,19 +55,33 @@ const detector = new StickDetector();
 const drums = new DrumEngine();
 const overlay = new Overlay(el.canvas);
 
-/* Detection rate *is* the latency, exactly as in the piano — a stroke cannot be
- * heard before the frame that shows the stick stopping — so the same tradeoffs
- * apply: no duty-cycle throttle, and a deliberately modest camera, because
- * inference cost tracks the source frame and MediaPipe downsamples hard
- * internally anyway.
- *
- * Drums are the least forgiving instrument here about this. A guitar strum has
- * internal spread to hide behind and a piano note blooms; a drum is nothing but
- * its attack, so timing error is the only thing you hear. */
-tracker.duty = 1;
+/* Detection rate is most of the latency — a stroke cannot be heard before the
+ * frame that shows the tip through the drum — so the tracker gets nearly all of
+ * the wall clock. Not *all* of it, which is the change: at a duty of 1 the main
+ * thread never leaves MediaPipe, painting gets whatever is left over, and the
+ * sticks stutter along at the tracking rate. The last tenth buys a steady 60fps
+ * canvas, and the frame loop interpolates across the gap between looks (see
+ * `frame`), so the small loss of detections costs far less than it returns. */
+tracker.duty = 0.9;
 const VIDEO = { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } };
 
+/**
+ * How long after the moment of contact a hit is scheduled to sound.
+ *
+ * Not latency for its own sake — a *budget*, and the difference matters. The
+ * detector knows when the tip crossed the head to well inside a frame, but
+ * that instant has usually just passed by the time the frame is handled, and by
+ * a different amount every time. Playing each hit immediately therefore smears
+ * a steady roll by however irregularly the tracker happened to look. Holding a
+ * couple of dozen milliseconds in hand lets every hit be placed at its true
+ * moment instead. Constant latency is something a player adapts to in seconds;
+ * jitter is something nobody ever adapts to.
+ */
+const WINDOW = 0.022;
+
 let kit = new Kit({ scale: S.size, lefty: S.lefty });
+detector.setKit(kit);
+detector.setMode(S.mode);
 detector.setReach(S.reach);
 
 /* ---------------- hand identity ----------------
@@ -101,33 +121,40 @@ function identify(hands) {
 let lastHitAt = 0;
 
 /**
- * Turn a detected stroke into a drum.
+ * Turn a detected contact into a drum.
  *
- * Two pads answer to *where on them* they were struck, which is the only
- * expression a real kit gets from position and is worth having:
+ * Two pads answer to *where across them* they were struck, which is the only
+ * expression a real kit gets from position and is worth having. It has to be
+ * across rather than up-and-down now: a stroke comes down through the surface,
+ * so it always arrives at the top of the head and the vertical offset carries
+ * no information at all. Sideways, it carries plenty.
  *
- *  • **Hi-hat** — the top of the pad is the open hat, the bottom the closed
- *    one. There is no foot pedal to work with, and asking for a second gesture
- *    to hold the hats open would occupy a hand that is busy playing. The pad is
- *    drawn as two discs so the split is visible rather than folklore.
+ *  • **Hi-hat** — through the middle is the closed hat, out at the edge is the
+ *    open one. There is no foot pedal to work with, and asking for a second
+ *    gesture to hold the hats open would occupy a hand that is busy playing.
  *  • **Ride** — the middle is the bell, the outside is the bow, which is
  *    exactly where they are on a real cymbal.
  */
 function strike(ev) {
-  const pad = kit.hitAt(ev);
+  const pad = kit.byId(ev.pad);
   if (!pad) return;
 
+  const ox = ev.ox;
   let voice = pad.voice, tone;
-  // Offsets across and up the pad, −1…1, from where the tip actually landed.
-  const ox = clamp((ev.x - pad.x) / pad.rx, -1, 1);
-  const oy = clamp((ev.y - pad.y) / pad.ry, -1, 1);
-  if (pad.id === 'hihat' && oy < -0.15) voice = 'hihatOpen';
-  if (pad.id === 'ride') tone = clamp(1 - Math.hypot(ox, oy) / 0.75, 0, 1);
+  if (pad.id === 'hihat' && Math.abs(ox) > 0.55) voice = 'hihatOpen';
+  if (pad.id === 'ride') tone = clamp(1 - Math.abs(ox) / 0.55, 0, 1);
 
-  const at = drums.hit(voice, ev.velocity, { pan: ox, tone });
+  // Place it at the moment of contact plus the window, so long as that moment
+  // has not already gone past — see WINDOW. When the tracker is slow the budget
+  // is simply spent and the hit goes out as soon as it can.
+  const lag = performance.now() / 1000 - ev.t;
+  const when = drums.ready ? drums.now() + Math.max(LOOKAHEAD, WINDOW - lag) : null;
+
+  const at = drums.hit(voice, ev.velocity, { when, pan: ox, tone });
+  const m = Math.hypot(ev.vx, ev.vy) || 1;
   overlay.onHit({
     pad: pad.id, x: ev.x, y: ev.y, hand: ev.id, velocity: ev.velocity,
-    at: at ?? drums.now(), dir: detector.dir, open: voice === 'hihatOpen',
+    at: at ?? drums.now(), dir: { x: ev.vx / m, y: ev.vy / m }, open: voice === 'hihatOpen',
   });
 
   const name = voice === 'hihatOpen' ? 'Hi-hat open'
@@ -139,6 +166,12 @@ function strike(ev) {
 }
 
 /* ---------------- controls ---------------- */
+/** Stick length is meaningless without a stick, so it goes away with one. */
+function paintMode() {
+  const row = $('reachRow');
+  if (row) row.hidden = S.mode !== STICK;
+}
+
 function initControls() {
   const seg = (id, get, set) => {
     $(id).addEventListener('click', (e) => {
@@ -148,10 +181,18 @@ function initControls() {
     });
     [...$(id).children].forEach((b) => b.classList.toggle('on', b.dataset.v === String(get())));
   };
-  const rebuild = () => { kit = new Kit({ scale: S.size, lefty: S.lefty }); };
+  const rebuild = () => {
+    kit = new Kit({ scale: S.size, lefty: S.lefty });
+    detector.setKit(kit);
+  };
+  seg('segMode', () => S.mode, (v) => {
+    S.mode = v; detector.setMode(v); detector.setReach(S.reach);
+    look.clear(); paintMode(); persist();
+  });
   seg('segSize', () => S.size, (v) => { S.size = +v; rebuild(); persist(); });
   seg('segHand', () => (S.lefty ? 'left' : 'right'), (v) => { S.lefty = v === 'left'; rebuild(); persist(); });
   seg('segReach', () => S.reach, (v) => { S.reach = +v; detector.setReach(S.reach); persist(); });
+  paintMode();
 
   const rng = (id, out, get, set) => {
     $(id).value = Math.round(get() * 100);
@@ -172,9 +213,11 @@ function initControls() {
 /* ---------------- veil ---------------- */
 function showStart(msg) {
   el.veil.hidden = false;
-  el.veilCard.innerHTML = `<h2>Point, and you're holding a stick</h2>
+  el.veilCard.innerHTML = `<h2>Point a finger and play</h2>
     <p>${msg || 'Sit back far enough that the camera can see both hands moving freely. Nothing is recorded and nothing leaves this tab.'}</p>
-    <p><b>Point your index finger</b> and a drumstick appears along it — one in each hand. Swing at a drum and stop; that stop is the hit, and how fast you were going is how hard it lands.</p>
+    <p><b>Point one index finger in each hand</b>, the other fingers tucked in, and the fingertip is what
+    strikes. Bring it down <b>through</b> a drum and it sounds, right as the tip goes through the head.
+    Prefer drumsticks? Switch to them under <b>Play with</b>.</p>
     <div class="veil-actions"><button class="btn" id="go">Start playing</button></div>
     <p class="veil-hint">No setting up — the kit is already where it needs to be.</p>`;
   $('go').onclick = boot;
@@ -305,10 +348,35 @@ function pump() {
 
 /* ---------------- frame loop ---------------- */
 let fps = 60, lastF = performance.now(), tick = 0, lastSeq = -1, rate = 0, live = [];
-/* Per-hand display state. Kept here rather than in the detector because it is
- * purely cosmetic — how far the stick has been raised, and how fast the tip is
- * travelling for the trail — and the detector has no business knowing about
- * either. */
+
+/**
+ * Critically damped follower — the standard implicit spring, which is stable at
+ * any step size and cannot overshoot.
+ *
+ * This is what makes the sticks look like objects rather than like tracking
+ * data. Landmarks arrive whenever inference finishes, which on a laptop is
+ * twenty-something times a second and never evenly; the canvas paints sixty
+ * times a second. Drawing the latest sample means the stick stands still and
+ * then jumps, and the eye reads that as the *instrument* being slow even when
+ * the detection underneath is fine. A spring keeps moving between samples, so
+ * what you see is continuous motion.
+ *
+ * It costs a few milliseconds of visual lag and buys none of it back in
+ * timing: contact is measured off the raw tip, and the flashes are scheduled
+ * against the audio clock, so neither goes anywhere near this.
+ */
+function spring(p, v, target, tau, dt) {
+  const w = 1 / Math.max(tau, 1e-4);
+  const f = 1 + 2 * dt * w;
+  const oo = w * w, hoo = dt * oo, hhoo = dt * hoo;
+  const det = 1 / (f + hhoo);
+  return [(f * p + dt * v + hhoo * target) * det, (v + hoo * (target - p)) * det];
+}
+const FOLLOW = 0.038;   // s for the drawn stick to settle onto the tracked one
+
+/* Per-hand display state: where the drawn stick has got to, how far it has been
+ * raised, and how fast the tip is travelling for the trail. Kept here rather
+ * than in the detector because all of it is cosmetic. */
 const look = new Map();
 
 function frame() {
@@ -322,33 +390,64 @@ function frame() {
   if (S.running && handsSeq !== lastSeq) {
     lastSeq = handsSeq;
     live = identify(hands);
-    for (const ev of detector.update(live.map((h) => ({ id: h.id, lm: h.lm })), handsAt)) strike(ev);
+    for (const ev of detector.update(live.map((h) => ({ id: h.id, lm: h.lm, world: h.world })), handsAt)) strike(ev);
   }
 
   const sticks = [];
   const seen = new Set();
   for (const h of live) {
-    let L = look.get(h.id);
-    /* Lightly smoothed — a tenth of the detector's, because this stick has to
-     * stay visibly glued to the finger it is drawn on, and lag there reads as
-     * the stick coming loose. It only needs to take the shimmer off. */
-    if (!L) { L = { hold: 0, speed: 0, vel: { x: 0, y: 0 }, prev: null, filter: new StickFilter(0.012) }; look.set(h.id, L); }
-    const st = L.filter.update(h.lm, S.reach, dt);
+    /* Drawn from the detector's own stick rather than recomputed alongside it.
+     * Two filters on the same landmarks drift apart, and when they do the stick
+     * you aim with is not the stick that hits — which is unplayable in a way
+     * that is very hard to diagnose from the outside. */
+    const A = detector.state(h.id);
+    const st = A?.stick;
     if (!st) continue;
     seen.add(h.id);
 
+    let L = look.get(h.id);
+    if (!L) {
+      L = { hold: 0, speed: 0, vel: { x: 0, y: 0 }, prev: null,
+            x: st.grip.x, y: st.grip.y, vx: 0, vy: 0,
+            ax: st.axis.x, ay: st.axis.y, dax: 0, day: 0, span: st.span };
+      look.set(h.id, L);
+    }
+    let drawn;
+    if (S.mode === STICK) {
+      [L.x, L.vx] = spring(L.x, L.vx, st.grip.x, FOLLOW, dt);
+      [L.y, L.vy] = spring(L.y, L.vy, st.grip.y, FOLLOW, dt);
+      // The axis is sprung as a vector rather than as an angle: the stick can
+      // point anywhere, and an angle would have to be unwrapped at every turn.
+      [L.ax, L.dax] = spring(L.ax, L.dax, st.axis.x, FOLLOW * 1.4, dt);
+      [L.ay, L.day] = spring(L.ay, L.day, st.axis.y, FOLLOW * 1.4, dt);
+      L.span += (st.span - L.span) * (1 - Math.exp(-dt / 0.12));
+      drawn = stickFrom({ grip: { x: L.x, y: L.y }, axis: { x: L.ax, y: L.ay, conf: st.conf }, span: L.span }, S.reach);
+    } else {
+      /* A fingertip is drawn exactly where the tracker says it is. The spring
+       * exists because a *derived* pose stutters between looks at the hands;
+       * a landmark does too, but smoothing it would move the striking point
+       * away from the one the detector is using, and on the tip of the finger
+       * you are aiming with that is worse than a little stutter. */
+      drawn = fingerFrom(h.lm, st.span);
+    }
+
     // Picking a stick up and putting it down is eased rather than switched, so
     // it reads as a movement instead of a graphic appearing.
-    const want = detector.state(h.id)?.holding ? 1 : 0;
+    const want = A.holding ? 1 : 0;
     L.hold += (want - L.hold) * (1 - Math.exp(-dt / (want ? 0.07 : 0.14)));
     if (L.prev) {
-      L.vel = { x: st.tip.x - L.prev.x, y: st.tip.y - L.prev.y };
-      L.speed = L.speed * 0.6 + (Math.hypot(L.vel.x, L.vel.y) / st.span / dt) * 0.4;
+      L.vel = { x: drawn.tip.x - L.prev.x, y: drawn.tip.y - L.prev.y };
+      L.speed = L.speed * 0.6 + (Math.hypot(L.vel.x, L.vel.y) / drawn.unit / dt) * 0.4;
     }
-    L.prev = { x: st.tip.x, y: st.tip.y };
-    // Which drum this stick is over, so the kit can say so before it is hit.
-    sticks.push({ id: h.id, stick: st, hold: L.hold, speed: L.speed, vel: L.vel,
-                  over: kit.hitAt(st.tip)?.id || null });
+    L.prev = { x: drawn.tip.x, y: drawn.tip.y };
+
+    sticks.push({
+      id: h.id, stick: drawn, hold: L.hold, speed: L.speed, vel: L.vel,
+      // Which drum this stick would sound, and whether it is high enough to do
+      // it — both straight from the detector, so the ring on screen is a
+      // promise rather than a second opinion.
+      over: A.over, armed: A.ready,
+    });
   }
   for (const id of look.keys()) if (!seen.has(id)) look.delete(id);
 
@@ -358,7 +457,9 @@ function frame() {
     pads: kit.pads(), sticks, labels: S.labels,
     armed: S.running && holding,
     hint: !S.running ? 'Press start'
-      : live.length ? 'Point your index finger to pick up a stick' : 'Show me your hands',
+      : !live.length ? 'Show me your hands'
+        : S.mode === STICK ? 'Close your hands to pick up the sticks'
+          : 'Point one index finger, the others tucked in',
   });
 
   if (++tick % 20 === 0) {
@@ -366,21 +467,23 @@ function frame() {
     el.pPerf.textContent = `${Math.round(fps)} fps · track ${rate.toFixed(0)}/s · ${tracker.emaMs.toFixed(0)} ms ${tracker.delegate.toLowerCase()}`;
     el.pPerf.classList.toggle('bad', rate > 0 && rate < 20);
     if (el.lat) {
-      // Be honest about where the delay comes from. A stroke cannot be detected
-      // before the frame that shows the stick stopping, so one sample interval
-      // is the floor and it dwarfs everything the audio path adds.
-      const detect = rate > 0 ? 1000 / rate : 0;
+      /* Be honest about where the delay comes from. Contact is caught on the
+       * frame it happens rather than after the stroke has finished, so the
+       * tracking share is now the average wait for the *next* look — half a
+       * sample interval — rather than a whole stroke's braking distance. */
+      const detect = rate > 0 ? 500 / rate : 0;
       el.lat.innerHTML = rate === 0 ? '—'
-        : `≈<b>${Math.round(detect + LOOKAHEAD * 1000)} ms</b> · ${Math.round(detect)} tracking + ${Math.round(LOOKAHEAD * 1000)} audio`
+        : `≈<b>${Math.round(detect + (WINDOW + LOOKAHEAD) * 1000)} ms</b> · ${Math.round(detect)} tracking + ${Math.round((WINDOW + LOOKAHEAD) * 1000)} audio`
           + (tracker.delegate === 'CPU' ? ' · <span class="warn">GPU off — see How to play</span>' : '');
     }
     if (stageDrifted()) syncStage();
     overlay.resize();   // no-op unless the canvas actually moved
     if (S.running) {
-      const n = live.length;
+      const n = live.length, up = sticks.filter((s) => s.hold > 0.5).length;
+      const what = S.mode === STICK ? 'stick' : 'finger';
       setPill(el.pHands, holding ? 'ok' : n ? 'warn' : 'bad',
-        holding ? (sticks.filter((s) => s.hold > 0.5).length === 2 ? 'both sticks' : 'one stick')
-          : n ? 'not pointing' : 'no hands');
+        holding ? (up === 2 ? `both ${what}s` : `one ${what}`)
+          : n ? (S.mode === STICK ? 'hands open' : 'not pointing') : 'no hands');
     }
     if (nowMs - lastHitAt > 4000 && el.hit.textContent !== '—') {
       el.hit.textContent = '—'; el.hit.style.color = '';
