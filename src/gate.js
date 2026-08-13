@@ -35,25 +35,32 @@ function veilStyles() {
     .gate { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center;
       padding: 24px; font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
       background:
-        radial-gradient(900px 520px at 20% -10%, #FFF6E4 0%, transparent 60%),
-        radial-gradient(760px 460px at 90% 4%, #FDEEDC 0%, transparent 58%),
-        linear-gradient(180deg, #FBF6EC 0%, #F1E5D3 100%); }
-    .gate-card { width: min(420px, 100%); text-align: center; background: #FFFCF6;
-      border: 1px solid rgba(44,33,24,.10); border-radius: 18px; padding: 30px 28px;
-      box-shadow: 0 2px 6px rgba(80,55,30,.08), 0 22px 50px -18px rgba(90,60,25,.32); }
-    .gate-mark { font-size: 26px; line-height: 1; }
-    .gate-card h1 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 23px;
-      letter-spacing: -.02em; margin: 12px 0 6px; color: #2C2118; }
-    .gate-card p { margin: 0; font-size: 13.5px; line-height: 1.6; color: #6E5C49; }
-    .gate-row { display: flex; gap: 8px; margin-top: 20px; }
-    .gate-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: #2C2118;
-      background: #fff; border: 1px solid rgba(44,33,24,.18); border-radius: 10px; padding: 11px 13px; }
-    .gate-row input:focus { outline: 2px solid rgba(224,147,47,.5); outline-offset: 1px; }
-    .gate-row button { font: inherit; font-size: 14px; font-weight: 600; color: #fff; cursor: pointer;
-      border: 0; border-radius: 10px; padding: 11px 20px;
-      background: linear-gradient(180deg, #EFA544, #D97F23);
-      box-shadow: 0 1px 0 rgba(255,255,255,.4) inset, 0 6px 16px -6px rgba(193,99,26,.7); }
-    .gate-msg { min-height: 18px; margin-top: 12px; font-size: 12.5px; color: #D2604F; }
+        radial-gradient(1000px 600px at 18% -12%, rgba(139,107,255,.20) 0%, transparent 62%),
+        radial-gradient(820px 500px at 90% 6%, rgba(59,227,236,.14) 0%, transparent 58%),
+        linear-gradient(178deg, #080A14 0%, #04050A 60%, #020307 100%); }
+    .gate-card { width: min(420px, 100%); text-align: center;
+      background: linear-gradient(168deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      border: 1px solid rgba(255,255,255,.10); border-radius: 20px; padding: 32px 28px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 34px 80px -34px rgba(0,0,0,.95); }
+    .gate-mark { width: 34px; height: 34px; margin: 0 auto; border-radius: 50%;
+      background: radial-gradient(circle at 34% 30%, #fff, #3BE3EC 46%, #8B6BFF);
+      box-shadow: 0 0 26px -2px rgba(59,227,236,.75); }
+    .gate-card h1 { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 27px;
+      letter-spacing: -.02em; margin: 16px 0 8px; color: #EDF1FF; }
+    .gate-card p { margin: 0; font-size: 13.5px; line-height: 1.65; color: rgba(237,241,255,.62); }
+    .gate-row { display: flex; gap: 8px; margin-top: 22px; }
+    .gate-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: #EDF1FF;
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.14);
+      border-radius: 11px; padding: 12px 14px; }
+    .gate-row input::placeholder { color: rgba(237,241,255,.32); }
+    .gate-row input:focus { outline: none; border-color: rgba(59,227,236,.55);
+      box-shadow: 0 0 0 3px rgba(59,227,236,.16); }
+    .gate-row button { font: inherit; font-size: 14px; font-weight: 600; color: #070812; cursor: pointer;
+      border: 0; border-radius: 11px; padding: 12px 22px;
+      background: linear-gradient(96deg, #FFFFFF, #BFE9F5);
+      box-shadow: 0 10px 26px -12px rgba(59,227,236,.9); }
+    .gate-msg { min-height: 18px; margin-top: 14px; font-size: 12.5px; color: #FF8FA6; }
     .gate.wrong .gate-card { animation: gate-shake .32s ease-out; }
     @keyframes gate-shake { 25% { transform: translateX(-6px) } 75% { transform: translateX(6px) } }
     @media (prefers-reduced-motion: reduce) { .gate.wrong .gate-card { animation: none } }
@@ -69,7 +76,7 @@ function show() {
   gate.className = 'gate';
   gate.innerHTML = `
     <div class="gate-card" role="dialog" aria-modal="true" aria-label="Restricted">
-      <div class="gate-mark" aria-hidden="true">🔒</div>
+      <div class="gate-mark" aria-hidden="true"></div>
       <h1>Restricted for now</h1>
       <p>Air Studio is being worked on and isn't open yet. If you've been given the key, enter it below.</p>
       <form class="gate-row" autocomplete="off">

@@ -149,14 +149,43 @@ try {
   ok(await evl(`window.__ac === 0 && airStudio.audio.ctx === null`),
     'a drag alone builds no audio graph (autoplay-safe)', `→ ${await evl(`window.__ac`)} context(s)`);
 
+  /* The threshold overlay is the whole reason this page is allowed to have
+   * music: it exists to collect the one real gesture a browser demands before
+   * it will make a sound. Everything about it is load-bearing. */
+  ok(await evl(`!!document.getElementById('threshold')
+    && getComputedStyle(document.getElementById('threshold')).opacity === '1'`),
+    'the threshold overlay is up, and nothing has made a sound yet');
+  // Its reveal is held until the gate lets go, so it is only just starting now.
+  await sleep(2600);
+  ok(await evl(`getComputedStyle(document.getElementById('enter')).opacity === '1'`),
+    'the threshold reveal waits for the gate rather than playing behind it');
+  const gateShot = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(new URL('./screenshot-threshold.png', import.meta.url), Buffer.from(gateShot.result.data, 'base64'));
+
   await evl(`document.getElementById('enter').click(); true`);
   await sleep(400);
   ok(await evl(`!!airStudio.audio.ctx && airStudio.audio.playing`),
-    'Enter starts the music');
+    'ENTER starts the music');
   ok(await evl(`window.__ac === 1`), 'exactly one audio context, reused for everything',
     `→ ${await evl(`window.__ac`)}`);
-  await sleep(700);
-  ok(await evl(`location.hash === '#apps'`), 'Enter opens the shelf');
+  await sleep(1300);          // the overlay dissolves over ~1 s before it is dropped
+  // An overlay that is invisible but still in the layout is still in the way —
+  // it holds a tab stop and it can still spill past the viewport.
+  ok(await evl(`document.getElementById('threshold').style.display === 'none'`),
+    'and the threshold leaves the layout, not merely the view');
+  ok(await evl(`document.body.classList.contains('entered')`),
+    'the landing entrance is gated on entering, so it plays where it can be seen');
+  ok(await evl(`location.hash !== '#apps'
+    && getComputedStyle(document.getElementById('hero')).visibility === 'visible'`),
+    'ENTER lands on the hero rather than skipping it');
+
+  await sleep(1400);          // let the letter stagger and the spec strip settle
+  const homeShot = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(new URL('./screenshot-home.png', import.meta.url), Buffer.from(homeShot.result.data, 'base64'));
+
+  await evl(`document.getElementById('to-studio').click(); true`);
+  await sleep(800);
+  ok(await evl(`location.hash === '#apps'`), 'the hero CTA opens the shelf');
   ok(await evl(`getComputedStyle(document.getElementById('shelf')).visibility === 'visible'`),
     'shelf scene is showing');
   ok(await evl(`document.querySelectorAll('.card').length === 3
@@ -178,7 +207,7 @@ try {
   await evl(`document.querySelector('.card').classList.add('nudge'); true`);
   await sleep(600);
   const shakenT = await evl(`getComputedStyle(document.querySelector('.card.nudge')).translate`);
-  ok(!/22px/.test(shakenT), 'a shaken card keeps its settled offset, not its pre-entry one',
+  ok(!/26px/.test(shakenT), 'a shaken card keeps its settled offset, not its pre-entry one',
     `→ translate: ${shakenT}`);
   // The music must be muteable, and the choice must survive a reload.
   await evl(`document.getElementById('sound').click(); true`);
@@ -196,13 +225,11 @@ try {
     'clearing the hash returns to the hero');
   ok(exceptions.length === 0, 'no exceptions on the landing page', exceptions[0] || '');
 
-  const homeShot = await send('Page.captureScreenshot', { format: 'png' });
-  writeFileSync(new URL('./screenshot-home.png', import.meta.url), Buffer.from(homeShot.result.data, 'base64'));
   await evl(`location.hash = '#apps'; true`);
-  await sleep(1800);          // card stagger runs ~1.05 s; let it settle before shooting
+  await sleep(1800);          // card stagger runs ~1.1 s; let it settle before shooting
   const shelfShot = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(new URL('./screenshot-shelf.png', import.meta.url), Buffer.from(shelfShot.result.data, 'base64'));
-  console.log('  screenshots → test/screenshot-home.png, test/screenshot-shelf.png');
+  console.log('  screenshots → test/screenshot-threshold.png, -home.png, -shelf.png');
 
   await send('Page.navigate', { url: APP });
 
@@ -653,10 +680,14 @@ try {
   await evl(`document.getElementById('bankClose').click(); true`);
   await sleep(200);
 
-  // …and the landing page.
+  // …and the landing page, which at this width has three layouts to get right:
+  // the threshold, the hero behind it, and the shelf.
   await send('Page.navigate', { url: HOME });
   await waitFor(`!!window.airStudio`, 20000, 'intro on mobile');
-  await sleep(600);
+  await sleep(900);
+  await overflow('threshold @390');
+  await evl(`document.getElementById('enter').click(); true`);
+  await sleep(1800);
   await overflow('intro @390');
   await evl(`location.hash = '#apps'; true`);
   await sleep(1600);

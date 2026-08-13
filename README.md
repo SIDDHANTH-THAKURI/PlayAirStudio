@@ -262,22 +262,99 @@ Air Guitar would fight the thing you are actually playing, so `play.html` loads
 none of it — a smoke test asserts the instrument page opens exactly one audio
 context, its own, for the strings.
 
-Out front, the first attempt was a Karplus-Strong pluck tied to the strings:
+Out front there are three screens: a **threshold** overlay, the landing, and the
+shelf. The threshold exists for one reason, and it is not decoration. A browser
+will not start audio without a genuine gesture, and a page whose first act is to
+ask permission to make noise has already lost the moment — so the overlay asks
+for exactly one click, and *that click is what builds the audio graph*. Nothing
+before it makes a sound. The smoke test drags across the strings and then
+requires that zero AudioContexts exist, because a mousemove is not user
+activation and a graph built there would sit suspended forever.
+
+**The score.** The first attempt was a Karplus-Strong pluck tied to the strings:
 a noise burst into a feedback delay. That is the right model for a *string* and
 completely wrong for interface sound — it rang metallic and had to be torn out.
-What replaced it is the other classic approach: a few sine partials with a soft
-attack and a long exponential tail, through a real convolution reverb, with no
-noise anywhere in the signal path except the impulse response, where it belongs.
-Everything is pinned to a D-major pentatonic, so any two notes that can overlap
-are consonant by construction and a hurried visitor mashing four cards still
-gets a chord rather than a cluster. Music starts when you press Enter — never
-before, since a mousemove is not user activation — and there is a mute toggle
-that is remembered.
+Its replacement was bells over a triangle pad, which was pleasant and thin: four
+chords, one voice of movement, and an obvious loop point at eight seconds.
 
-The six lines behind the wordmark still pluck when you drag through them, using
+What is there now is generative cinematic ambient in A minor — sub bass, a
+breathing pad, and a bell arpeggio through a dotted-eighth ping-pong delay into a
+convolution hall — and it is built around the two things that make a score read
+as *scored* rather than as a widget making notes:
+
+- **Everything moves at a different rate.** The pad's filter breathes on a
+  0.07 Hz LFO, an air layer sweeps on another, and the delay repeats land
+  *between* the arpeggio's own notes, which is most of why eight notes a bar
+  sound like sixteen. Nothing lines up, so nothing ticks.
+- **The loop is longer than the memory of it.** Eight bars at 68 BPM is ~28 s,
+  the arpeggio shape alternates by bar, and a high theme note appears in only
+  four of the eight. Two passes are never identical.
+
+Still no noise anywhere in the signal path except the reverb's impulse response,
+the air layer and the entry impact — the three places noise belongs. Chords are
+voiced so any two notes that can overlap are consonant, so a hurried visitor
+mashing four cards gets a chord rather than a cluster. The mute toggle is
+remembered, and it only appears once there is something to mute.
+
+**The visuals are one canvas.** Nebula, stars, a planet's limb, a scrim, the
+dial, the strings, dust, shockwaves and the cursor light are all drawn in a
+single rAF, back to front. Four of those are worth naming:
+
+- *The nebula is noise, not gradients.* The first build was five big radial
+  gradients drifting on Lissajous paths. It was cheap and smooth and it looked
+  like every other dark landing page, because a radial gradient can only make a
+  blob and a nebula is not blobs — it is filaments, bright threads with dark
+  dust lanes between them. That comes from **domain warping**: sampling the
+  noise at coordinates that have themselves been displaced by noise. There is no
+  way to fake it with gradients.
+
+  It costs ~0.1 s per tile, which is far too long to spend inside a frame, so
+  three tiles are built one per rAF and faded in as they arrive. The page is
+  interactive throughout and the sky assembles behind it. Each tile is then
+  blitted twice at different scales and rotations — one copy of a cloud is a
+  shape you recognise, two overlapping is a cloud.
+
+  Getting the density curve wrong is the easy failure and it is invisible in
+  code review: summed octaves of value noise cluster around 0.5, with a real
+  range of roughly 0.3–0.7 rather than 0–1. Thresholding *that* and then raising
+  it to a power left every pixel at about 3% alpha, and the first sky was
+  blank. Stretch the contrast about the midpoint first and the threshold means
+  what it looks like it means.
+- *The horizon is a silhouette with a lit edge.* A planet's limb, low in the
+  frame, is the single element that stops the page reading as content floating
+  in the middle of nothing — once there is a horizon, everything above it is
+  somewhere. It is one radial gradient inside an elliptical transform. Six
+  stacked wide strokes were the obvious way to do it and they banded, because a
+  260 px stroke is a band with two hard edges.
+- *The scrim is the price of the sky.* A dark pool through the middle, under the
+  type. Without it the lede is unreadable over the bright half of the nebula and
+  no amount of `text-shadow` fixes that.
+- *The dial is the music.* A ring of ticks whose lengths are the score's own
+  spectrum off an `AnalyserNode`, log-spaced into 40 bands, mirrored so there is
+  no seam, and coloured bass→treble around the circle so the shape you see is
+  the shape of the chord. Ninety-six ticks cost three strokes a frame, because
+  they are bucketed by colour into three paths. It stands down below ~840 px:
+  a ring only works if it can get *outside* the words, and a narrow screen has
+  it cutting through the copy instead of framing it.
+
+The six lines behind everything still pluck when you drag through them, using
 crossing detection rather than proximity so a fast sweep fires all six instead of
-dropping the ones you jumped over. They are silent: sound hanging off a mousemove
-is how a page ends up making noise before you asked it for anything.
+dropping the ones you jumped over. They are silent to the pointer — sound hanging
+off a mousemove is how a page ends up making noise before you asked it for
+anything — but they are *not* silent to the score: every note the music plays
+rings the string nearest its pitch, so what you hear and what you see are one
+event rather than two that happen to coincide.
+
+**Frames before particles.** The stage keeps a rolling average of frame time and
+spends the budget in a fixed order: drop motes first, then the string glow, and
+never the frame rate. Dropping a hundred motes is invisible; dropping to 40 fps
+is the only thing anybody would actually notice.
+
+**Type is Fraunces + Inter**, the same pair the instruments use, so the front
+door and the rooms behind it are one typeface at two temperatures. The page's
+own chrome is a viewfinder — four corner brackets and two rails — rather than a
+border, which on a product that is a camera watching your hands is the right
+kind of cheap.
 
 **Hand roles** are identified with MediaPipe handedness and *locked* on first
 sighting, so crossing your hands mid-song never swaps duties.
@@ -765,10 +842,10 @@ temporary should have.
 ## Files
 
 ```
-index.html              Air Studio: animated landing page + app shelf
-intro.css               landing-page theme
-src/intro.js            pluckable string field, scene transitions
-src/audio-intro.js      landing-page music and touch sounds (never loaded by the app)
+index.html              Air Studio: threshold → landing → app shelf
+intro.css               landing-page theme (dark; the instruments are still light)
+src/intro.js            the canvas: nebula, stars, horizon, dial, strings, dust — and the scenes
+src/audio-intro.js      landing-page score and touch sounds (never loaded by the app)
 play.html               Air Guitar: markup, control panel, three modals
 piano.html / piano.css  Air Piano: markup and its few theme additions
 src/piano/geometry.js   calibration homography, desk ⇄ image mapping
@@ -810,7 +887,7 @@ All headless, no dependencies beyond Node ≥ 21 (smoke needs Chrome or Edge):
 node test/sim.mjs         # shape matcher, both hands' mode machines, chords, scheduler
 node test/dsp.mjs         # renders the worklet offline: tuning (±1¢), decay, bends, stability
 node test/perf.mjs        # inference duty-cycle, delegate choice, scheduling under stalls
-node test/smoke.mjs       # real Chromium + fake webcam over CDP: shelf, tutorial, boot, editors, audio
+node test/smoke.mjs       # real Chromium + fake webcam over CDP: threshold, shelf, tutorial, boot, editors, audio
 
 # piano
 node test/piano.mjs       # homography, tap detection at controlled sample rates, scales
