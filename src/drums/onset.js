@@ -51,7 +51,7 @@ const inv = (v, a, b) => clamp((v - a) / (b - a), 0, 1);
  * means something different for every player and every seating position, on a
  * kit whose drums are at fixed places on the screen. */
 export const DEFAULTS = {
-  MIN_SPEED:  1.05,  // units/s downward at the surface for a crossing to count
+  MIN_SPEED:  0.90,  // units/s downward at the surface for a crossing to count
   VEL_SOFT:   1.6,   // peak speed for the quietest stroke…
   VEL_HARD:   10.5,  // …and the loudest
   PEAK_HOLD:  0.11,  // s; loudness comes from the fastest part of the swing
@@ -61,6 +61,7 @@ export const DEFAULTS = {
   SETTLE:     0.10,  // s ignored after a hand appears, while filters fill
   SMOOTH:     0.010, // s of velocity smoothing; sits in the latency budget
   MAX_JUMP:   37,    // units/s past which this is the tracker re-acquiring
+  MIN_REACH:  0,     // …of a full stick, below which there is nothing to hit with
 };
 
 /**
@@ -73,7 +74,12 @@ export const DEFAULTS = {
  * spans off the end of a hand, so it is far quieter and can afford it.
  */
 export const MODES = {
-  [STICK]: {},
+  /* A stick aimed straight down the lens has no length in the image and no tip
+   * worth speaking of — `stick.js` draws it as a stub, and this is the other
+   * half of that bargain: a stub cannot strike. Without it, the instant the
+   * hand turns back over and the stick grows out the other way would register
+   * as a stroke travelling the length of the frame. */
+  [STICK]: { MIN_REACH: 0.5 },
   [FINGER]: { MIN_SPEED: 1.8, VEL_SOFT: 2.4, VEL_HARD: 13.0, LIFT: 0.14, REFRACTORY: 0.055 },
 };
 
@@ -172,6 +178,20 @@ export class StickDetector {
 
       const prev = A.prev;
       A.prev = { x: tip.x, y: tip.y, t };
+
+      /* Nothing to hit with. The tip is inside the fist and about to come out
+       * the other side, so everything measured from it here — speed, lift, the
+       * crossing itself — would be describing the stick turning round rather
+       * than the player swinging. Park the arm and pick it up again when there
+       * is a stick. */
+      if (stick.reach < stick.unit * o.MIN_REACH) {
+        /* `prev` goes too, not just the speed. The frame after the stick grows
+         * back has a stub for its previous sample, so the tip appears to have
+         * travelled the length of a stick since the last look — which reads as
+         * a crossing, and sounds a drum nobody hit. Start again instead. */
+        A.prev = null; A.v = 0; A.peak = 0; A.armed = true; A.ready = false; A.deepest = tip.y;
+        continue;
+      }
       // Nothing to compare against yet. Being armed costs nothing here: a
       // crossing needs a sample above the surface *and* one below it, so a hand
       // that appears already low simply cannot fire until it has come up.

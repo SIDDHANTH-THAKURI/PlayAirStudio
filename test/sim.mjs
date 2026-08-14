@@ -3,7 +3,8 @@
  * shape-driven gesture engine, and the pattern scheduler.
  * Run: node test/sim.mjs
  */
-import { GestureEngine, matchShape, SIGNS, STRUM_SIGNS, FINGER_STRINGS } from '../src/gestures.js';
+import { GestureEngine, matchShape, SIGNS, STRUM_SIGNS, FINGER_STRINGS,
+  GRID_Y0, GRID_Y1 } from '../src/gestures.js';
 import { buildSet, buildChord, specToChord, specName, defaultGridSpecs, defaultSignSpecs,
   GRID_CELLS, SIGN_CELLS, STYLES, NOTE_NAMES } from '../src/chords.js';
 import { PatternPlayer, PATTERNS, getPattern, listPatterns, saveCustom, removeCustom,
@@ -238,7 +239,7 @@ const shape = (name, extra = {}) =>
 const ramp = (t, t0, dur) => Math.max(0, Math.min(1, (t - t0) / dur));
 
 /** Drive the engine at 60 fps. fret(t)/pluck(t) → hand options | null. */
-function run(secs, fret, pluck, cfg = CFG()) {
+function run(secs, fret, pluck, cfg = CFG(), lay = LAY) {
   const g = new GestureEngine();
   const events = [], slots = [];
   for (let i = 0; i < Math.round(secs * 60); i++) {
@@ -247,7 +248,7 @@ function run(secs, fret, pluck, cfg = CFG()) {
     const f = fret ? fret(t) : null, p = pluck ? pluck(t) : null;
     if (f) hands.push(makeHand(f.x, f.y, f));
     if (p) hands.push(makeHand(p.x, p.y, p));
-    events.push(...g.update(hands, t, LAY, cfg).map((e) => ({ ...e })));
+    events.push(...g.update(hands, t, lay, cfg).map((e) => ({ ...e })));
     slots.push(g.fret.slot);
   }
   return { g, events, slots };
@@ -282,6 +283,43 @@ r = run(4, (t) => ({ x: 0.10, y: t < 2 ? 0.30 : 0.95, ...shape('point') }), null
 // Tremor on a cell boundary must not strobe the chord.
 r = run(5, () => ({ x: 0.03 + 0.45 / 4 + jit(0.008), y: 0.6, ...shape('point') }), null);
 ok(of(r, 'chord').length <= 2, 'cell boundary hover does not flicker', `(${of(r, 'chord').length})`);
+
+/* ---- the bottom row has to be physically reachable ----
+ *
+ * Regression, and one that made four of the twelve chords simply unusable.
+ *
+ * The measurement that matters is the *middle of the lowest drawn cell*, not
+ * its top edge, because that is where a player aims — the wall is painted on
+ * screen and you point at the box you can see. Merely entering the row was
+ * always borderline-possible; centring on it was not. With the old 0.90 bound
+ * the lowest cell centred at 0.77, and a pointing hand carries its wrist about
+ * a quarter of a frame below the fingertip, which put the wrist past the
+ * bottom edge with no palm context left for the tracker. The hand was gone
+ * before the chord was.
+ *
+ * So: aim at the cell centre, then assert the wrist is still on screen. The
+ * hand geometry is measured off the rig rather than assumed, and the *real*
+ * GRID_Y0/GRID_Y1 are used rather than this file's LAY fixture, so pushing the
+ * wall's lower bound back down fails right here. */
+{
+  const REAL = { ...LAY, gridY0: GRID_Y0, gridY1: GRID_Y1 };
+  const { rows } = CFG();
+  const rowMid = GRID_Y0 + ((rows - 0.5) / rows) * (GRID_Y1 - GRID_Y0);
+
+  const probe = makeHand(0.10, 0.5, shape('point'));
+  const tipOff = probe.lm[8].y - 0.5;          // fingertip, relative to `cy`
+  const drop = probe.lm[0].y - probe.lm[8].y;  // wrist sits this far below it
+  const cy = rowMid - tipOff;                  // put the fingertip on rowMid
+  const wrist = cy + (probe.lm[0].y - 0.5);
+
+  ok(wrist <= 0.90, 'aiming at the lowest cell leaves the wrist on screen',
+    `wrist y=${wrist.toFixed(3)}, cell centre ${rowMid.toFixed(3)}, wrist drop ${drop.toFixed(3)}`);
+
+  const r2 = run(2, () => ({ x: 0.10, y: cy, ...shape('point') }), null, CFG(), REAL);
+  const ev = of(r2, 'chord');
+  ok(ev.length >= 1 && ev[ev.length - 1].index >= 8, '…and that aim commits a bottom-row chord',
+    `→ cell ${ev.length ? ev[ev.length - 1].index : 'none'}`);
+}
 
 /* ---- fretting hand: sign chords ---- */
 r = run(2, () => ({ x: 0.2, y: 0.5, ...shape('horns') }), null, CFG({ chordMode: 'signs' }));

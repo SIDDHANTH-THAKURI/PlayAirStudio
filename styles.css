@@ -45,6 +45,19 @@ body{
 .pill.bad{color:var(--rose)} .pill.bad .dot{background:var(--rose);box-shadow:0 0 0 3px rgba(210,96,79,.16)}
 .pill-quiet{color:var(--ink3);font-variant-numeric:tabular-nums}
 
+/* The face-blur switch. A pill so it sits with the status row, but a real
+   button: it is the one thing up there you can press. */
+.pill-toggle{font:inherit;font-size:12px;cursor:pointer;color:var(--ink2);
+  -webkit-tap-highlight-color:transparent;transition:background .18s,border-color .18s,color .18s}
+.pill-toggle:hover{background:#FFF8EC;border-color:var(--line2);color:var(--ink)}
+.pill-toggle:focus-visible{outline:2px solid rgba(224,147,47,.55);outline-offset:2px}
+.pill-ico{width:14px;height:14px;flex:none}
+/* Slash means "hidden", so it belongs on the pressed state, not the resting
+   one — the icon reads as the state it is *in*, not the action it performs. */
+.pill-ico .pill-ico-slash{opacity:0;transition:opacity .18s}
+.pill-toggle[aria-pressed="true"]{color:#3F6B4C;background:#E9F3EC;border-color:rgba(94,140,106,.42)}
+.pill-toggle[aria-pressed="true"] .pill-ico-slash{opacity:1}
+
 /* ---------- layout ---------- */
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 306px;gap:20px;align-items:start;flex:1}
 @media (max-width:1020px){.layout{grid-template-columns:1fr}}
@@ -53,9 +66,36 @@ body{
   border:1px solid var(--line2);box-shadow:var(--sh-m)}
 .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .stage video{object-fit:cover;transform:scaleX(-1);filter:saturate(.82) brightness(1.1) contrast(.94)}
-.stage canvas{pointer-events:none}
+/* Explicit stacking, because the veil has to slot *between* these two: the
+   video is hidden, the drawn hands and chord wall are not. Relying on DOM
+   order stopped working the moment anything positioned got a z-index. */
+.stage canvas{pointer-events:none;z-index:3}
 .stage::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:18px;
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.5), inset 0 0 90px rgba(255,241,220,.30)}
+
+/* ---------- face veil ----------
+   Sits over the video and under the overlay canvas, so the blur hides the
+   player without ever touching the drawn hands or the chord wall. It is a
+   `backdrop-filter`, not a canvas: the GPU composites it, nothing reads pixels
+   back, and the decoded frames the tracker sees are untouched by definition.
+
+   The mask feathers the edge — a hard-edged blurred rectangle reads as a
+   redaction box, and this is meant to look deliberate. `transition` covers the
+   5 Hz detection rate: the element only gets a new position five times a
+   second, and easing between them is what makes it look like it is following
+   a head rather than teleporting after one. */
+.face-veil{position:absolute;z-index:2;pointer-events:none;border-radius:50%;
+  backdrop-filter:blur(26px) saturate(.7);-webkit-backdrop-filter:blur(26px) saturate(.7);
+  background:rgba(237,226,210,.16);
+  -webkit-mask-image:radial-gradient(closest-side,#000 58%,rgba(0,0,0,.55) 78%,transparent 100%);
+  mask-image:radial-gradient(closest-side,#000 58%,rgba(0,0,0,.55) 78%,transparent 100%);
+  transition:left .22s linear,top .22s linear,width .22s linear,height .22s linear}
+/* No face, no model, or the face just went missing: cover everything. This is
+   the fail-closed state — see the note at the top of src/privacy.js. */
+.face-veil.all{left:0;top:0;width:100%;height:100%;border-radius:0;
+  backdrop-filter:blur(30px) saturate(.6);-webkit-backdrop-filter:blur(30px) saturate(.6);
+  -webkit-mask-image:none;mask-image:none;transition:none}
+@media (prefers-reduced-motion:reduce){.face-veil{transition:none}}
 
 /* ---------- coach ---------- */
 .coach{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center;
@@ -236,15 +276,31 @@ select.mini{font-size:12.5px;padding:6px 26px 6px 9px;border-radius:8px;backgrou
 .pat-grid{display:grid;grid-template-columns:196px minmax(0,1fr);gap:20px;align-items:start}
 @media (max-width:760px){.pat-grid{grid-template-columns:1fr}}
 .pat-col h3{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3);margin:0 0 9px}
-.pat-list{display:flex;flex-direction:column;gap:6px;max-height:330px;overflow:auto}
+/* Tall enough that "More patterns" is visible without scrolling for it — a
+   group nobody scrolls to is a group nobody finds. */
+.pat-list{display:flex;flex-direction:column;gap:6px;max-height:min(58vh,520px);overflow:auto}
 .plitem{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;font-family:var(--ui);
   text-align:left;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:#FBF5EA;cursor:pointer;
   transition:background .16s,border-color .16s}
 .plitem:hover{background:#FFF8EC}
-.plitem.on{background:linear-gradient(180deg,#FFF3DE,#FDE7C6);border-color:rgba(192,99,26,.45)}
 .plitem.ghost{border-style:dashed;background:transparent;color:var(--ink2)}
 .pl-name{font-size:13.5px;font-weight:600;color:var(--ink)}
 .pl-kind{font-size:10.5px;color:var(--ink3);letter-spacing:.05em}
+
+/* A row is the name plus its own ▶. The selected state moved from `.plitem`
+   to the row so the whole pair lights up, not just the left half of it. */
+.plrow{display:flex;gap:6px;align-items:stretch}
+.plrow>.plitem{flex:1;min-width:0}
+.plrow.on>.plitem{background:linear-gradient(180deg,#FFF3DE,#FDE7C6);border-color:rgba(192,99,26,.45)}
+.plprev{flex:none;width:36px;display:grid;place-items:center;font-size:11px;line-height:1;color:var(--ink2);
+  border:1px solid var(--line);border-radius:10px;background:#FBF5EA;cursor:pointer;
+  transition:background .16s,border-color .16s,color .16s}
+.plprev:hover{background:#FFF8EC;color:var(--amber-d)}
+.plprev.on{background:linear-gradient(180deg,#FFF3DE,#FDE7C6);border-color:rgba(192,99,26,.45);color:var(--amber-d)}
+
+.pl-group{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);
+  margin:8px 0 1px;padding:0 2px}
+.pl-group:first-child{margin-top:0}
 
 .pe-head{display:flex;gap:10px;align-items:center;margin-bottom:14px}
 .pe-name{flex:1;font-family:var(--disp);font-size:20px;font-weight:600;color:var(--ink);background:#FFF;

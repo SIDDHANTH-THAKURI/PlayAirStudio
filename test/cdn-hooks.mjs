@@ -11,6 +11,12 @@ export class HandLandmarker {
              _d: o?.baseOptions?.delegate };
   }
 }
+/* privacy.js pulls this one, and only when the face blur is switched on. */
+export class FaceDetector {
+  static async createFromOptions(_v, o) {
+    return { close() {}, detectForVideo: () => ({ detections: [] }), _d: o?.baseOptions?.delegate };
+  }
+}
 export default {};
 `;
 

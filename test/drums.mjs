@@ -9,7 +9,7 @@
  *
  * Run: node test/drums.mjs
  */
-import { stickOf, poseOf, spanOf, closeOf, pointOf, Grip, reachOf,
+import { stickOf, poseOf, spanOf, closeOf, pointOf, Grip, reachOf, axisOf, PoseFilter,
   STICK, FINGER, LENGTH } from '../src/drums/stick.js';
 import { Kit, PADS, SURFACE } from '../src/drums/kit.js';
 import { StickDetector } from '../src/drums/onset.js';
@@ -18,6 +18,24 @@ let fails = 0;
 const ok = (c, m, x = '') => { if (!c) { fails++; console.log(`  FAIL  ${m} ${x}`); } else console.log(`  ok    ${m} ${x}`); };
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
+
+/**
+ * Tracker jitter, from a fixed seed.
+ *
+ * The margins below are *printed*, and a printed margin drawn from an unseeded
+ * generator is not a measurement — the slowest-stroke column moved between 2/8
+ * and 6/8 across consecutive runs of identical code, which is enough noise to
+ * hide, or invent, a real change. Same seed every run, so two numbers can be
+ * compared.
+ */
+let seed = 0x9e3779b9;
+const rnd = () => {
+  seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const reseed = () => { seed = 0x9e3779b9; };
 
 /* ================================================================== *
  *  Synthetic hand: a wrist, a palm, and four fingers that don't matter.
@@ -37,7 +55,7 @@ function makeHand(id, { wx = 0.5, wy = 0.4, span = 0.12, angle = Math.PI / 2,
   const lm = Array.from({ length: 21 }, () => ({ x: wx, y: wy }));
   const ux = Math.cos(angle), uy = Math.sin(angle);          // wrist → knuckles
   const px = -uy, py = ux;                                   // across the palm
-  const j = () => (jitter ? (Math.random() - 0.5) * 2 * jitter * span : 0);
+  const j = () => (jitter ? (rnd() - 0.5) * 2 * jitter * span : 0);
   lm[0] = { x: wx, y: wy };
   KN.forEach((k, i) => {
     lm[k] = { x: wx + ux * span + px * SPREAD[i] * span + j(),
@@ -52,6 +70,76 @@ function makeHand(id, { wx = 0.5, wy = 0.4, span = 0.12, angle = Math.PI / 2,
                y: lm[KN[i]].y + uy * span * reach + j() };
   });
   return { id, lm };
+}
+
+/* ================================================================== *
+ *  A hand that is actually in the room.
+ *
+ *  Every fixture above is flat: knuckles a fixed distance from the wrist *in
+ *  the image*, so the hand's forward axis always projects to its full length
+ *  and `conf` is 1 whatever the test does. That is a fine way to check the
+ *  geometry's arithmetic and a poor way to check the geometry, because the one
+ *  thing this instrument is hard at — the playing pose points the knuckles at
+ *  the lens, and the forward axis is exactly what disappears there — is the one
+ *  thing a flat hand cannot express. It is why a stick that shrank to a stub
+ *  through every ordinary stroke passed everything below for weeks.
+ *
+ *  So: a hand in metres, posed in 3D, and projected through a pinhole camera —
+ *  which also hands the world landmarks over honestly, since those are what the
+ *  hand-relative measurements are supposed to use.
+ * ================================================================== */
+const PIP = [6, 10, 14, 18];
+const MCP_ACROSS = [-0.034, -0.011, 0.011, 0.034];   // index…pinky, metres
+const MCP_ALONG = [0.095, 0.098, 0.093, 0.085];
+const cross3 = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const add3 = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+const mul3 = (a, k) => [a[0]*k, a[1]*k, a[2]*k];
+
+/**
+ * A hand in its own frame: across the palm, along it, and out of its back.
+ * `curl` 1 folds the fingers onto the palm; `point` straightens the index and
+ * folds the rest, which is the fingertip mode's pose.
+ */
+function handMetric({ curl = 1, point = false } = {}) {
+  const P = Array.from({ length: 21 }, () => [0, 0, 0]);
+  KN.forEach((k, i) => { P[k] = [MCP_ACROSS[i], MCP_ALONG[i], 0]; });
+  KN.forEach((k, i) => {
+    const c = point ? (i ? 1 : 0) : curl;
+    const len = 0.085 - i * 0.004;
+    const a1 = c * 1.6, a2 = c * 3.3;      // knuckle folds 90°, the rest back over the palm
+    P[PIP[i]] = [MCP_ACROSS[i], MCP_ALONG[i] + len * 0.45 * Math.cos(a1), -len * 0.45 * Math.sin(a1)];
+    P[TIPS[i]] = [MCP_ACROSS[i],
+      MCP_ALONG[i] + len * (0.45 * Math.cos(a1) + 0.55 * Math.cos(a2)),
+      -len * (0.45 * Math.sin(a1) + 0.55 * Math.sin(a2))];
+  });
+  return P;
+}
+
+/**
+ * That hand, held out in front of a camera and projected.
+ *
+ * `pitch` is how far the fingers are tipped down from pointing straight at the
+ * lens — 0 is the fully degenerate pose, 90° is a hand seen broadside pointing
+ * at the floor. `roll` turns the palm about that same axis. A drummer plays
+ * somewhere around 20–45°.
+ */
+function makeHand3D(id, { pitch = Math.PI / 4, roll = 0, yaw = 0, at = [0, -0.05, 0.15] } = {}, shape = {}) {
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const f = [sy * cp, -sp, cy * cp];                       // wrist → knuckles
+  const l0 = [cy, 0, -sy], n0 = cross3(f, l0);
+  const l = add3(mul3(l0, Math.cos(roll)), mul3(n0, Math.sin(roll)));
+  const n = cross3(f, l);
+  const world = handMetric(shape).map((p) =>
+    add3(at, add3(add3(mul3(l, p[0]), mul3(f, p[1])), mul3(n, p[2]))));
+  // Pinhole, camera at z = 1 looking back along -z, 4:3 and about 60° across.
+  const lm = world.map((p) => {
+    const z = Math.max(1e-3, 1 - p[2]);
+    return { x: 0.5 + 0.9 * p[0] / z, y: 0.5 - 1.2 * p[1] / z };
+  });
+  // …and the metric, hand-relative landmarks MediaPipe would report alongside.
+  const w = world.map((p) => ({ x: p[0] - world[0][0], y: -(p[1] - world[0][1]), z: -(p[2] - world[0][2]) }));
+  return { id, lm, world: w };
 }
 
 /**
@@ -128,20 +216,150 @@ console.log('\nstick');
     `axis ${upish.axis.x.toFixed(2)}, ${upish.axis.y.toFixed(2)}`);
 
   /* Sweeping the hand right through the degenerate pose — pointing straight at
-   * the camera, where the axis has no length and no meaning — must not throw
-   * the tip anywhere. It cannot flip, because the direction is directed; and
-   * it barely moves, because the stick is drawn shorter by exactly how little
-   * its direction can be believed. */
-  let jump = 0, prev = null;
+   * the camera, where the forward axis has no length and no meaning — must not
+   * throw the tip anywhere. It cannot flip end for end, because the reversal
+   * goes *through* the grip: the stick shrinks to a point and grows back the
+   * other way, which is what a real one does.
+   *
+   * The measured step is much larger than it was, and that is the trade this
+   * geometry makes on purpose. The shrink used to be spread across the whole
+   * range of hand angles, which made this sweep gentle and cost half the stick
+   * in every pose a drum is played from; it is now confined to the narrow band
+   * where the direction genuinely reverses. What has to hold is that the tip
+   * passes through the fist rather than across it, and that it cannot sound a
+   * drum on the way (see 'a stick turning over', below). */
+  let jump = 0, prev = null, closest = 9;
   for (let k = -1; k <= 1; k += 0.005) {
     const h = makeHand('r', { angle: Math.PI / 2, span: 0.12 });
     for (const kn of KN) h.lm[kn].y = h.lm[0].y + 0.12 * k;   // axis shrinks through zero
     const s = stickOf(h.lm);
     if (prev) jump = Math.max(jump, Math.hypot(s.tip.x - prev.x, s.tip.y - prev.y) / s.span);
+    closest = Math.min(closest, Math.hypot(s.tip.x - s.grip.x, s.tip.y - s.grip.y) / s.span);
     prev = s.tip;
   }
-  ok(jump < 0.06, 'and turning the hand through the camera never throws the tip',
+  ok(closest < 0.02, 'a hand turning through the camera takes its stick through the fist, not across it',
+    `closest the tip comes to the grip: ${closest.toFixed(4)} spans`);
+  ok(jump < 0.25, 'and never further than the stick is long in one step',
     `largest step ${jump.toFixed(4)} spans`);
+}
+{
+  /* The property the whole geometry now exists for: on a hand posed in real 3D
+   * and projected, the stick is the same length in every pose a kit can be
+   * played from. It is what "the sticks are connected to my hand" means
+   * mechanically — a tip a fixed distance from the fist — and the version
+   * before this had none of it. */
+  const at = (deg, o = {}) => stickOf(makeHand3D('r', { pitch: deg * Math.PI / 180, ...o }).lm, LENGTH,
+    makeHand3D('r', { pitch: deg * Math.PI / 180, ...o }).world);
+  const len = (s) => Math.hypot(s.tip.x - s.grip.x, s.tip.y - s.grip.y) / s.unit;
+  const play = [15, 20, 25, 30, 40, 50, 60, 75, 90];
+  const lens = play.map((d) => len(at(d)));
+  console.log('        stick drawn, as a share of full, per hand pitch — '
+    + play.map((d, i) => `${d}°:${(lens[i] * 100).toFixed(0)}%`).join('  '));
+  ok(Math.min(...lens) > 0.999, 'a stick is the same length at every angle a drum is played from',
+    `shortest ${(Math.min(...lens) * 100).toFixed(1)}% of full`);
+
+  /* And the consequence, which is what made the kit unreachable: the tip has to
+   * hang a whole stick below the fist, or the drums are drawn somewhere the
+   * hands cannot get to without leaving the frame. */
+  const s30 = at(30);
+  ok(s30.tip.y - s30.grip.y > s30.unit * 0.85, 'so it still reaches the kit from a natural hand angle',
+    `tip hangs ${(s30.tip.y - s30.grip.y).toFixed(3)} below the fist, of ${s30.unit.toFixed(3)}`);
+
+  /* A stroke *is* a wrist flick, so the pose changes throughout it. Measure how
+   * much of the tip's travel is the hand moving and how much is the stick
+   * sliding in and out of the fist — the latter is motion the player did not
+   * make, and it used to be most of it. */
+  let lo = 9, hi = 0, wasLo = 9, wasHi = 0, rawLo = 9, rawHi = 0;
+  /* Through the filter, because that is the stick the instrument uses and
+   * draws. What is left of the wobble after this is not the projection at all —
+   * it is the ruler: a hand pitching down really does change size on screen
+   * under perspective, and `spanOf` follows it. The span is smoothed over
+   * 0.14 s, which is long against a stroke, so most of that never arrives. */
+  const filt = new PoseFilter();
+  filt.setMode(STICK);
+  const settle = makeHand3D('r', { pitch: 12 * Math.PI / 180 });
+  for (let i = 0; i < 30; i++) filt.update(settle.lm, LENGTH, 1 / 30, settle.world);
+  // …and then a stroke at the speed a stroke happens: 12° to 60° of wrist in
+  // 0.15 s, sampled at 30 looks a second. Sweeping it slowly would give the
+  // span filter time to follow the ruler and quietly flatter the result.
+  for (let f = 0; f <= 5; f++) {
+    const d = 12 + f * 9.6;
+    const h = makeHand3D('r', { pitch: d * Math.PI / 180 });
+    const s = filt.update(h.lm, LENGTH, 1 / 30, h.world);
+    const r = Math.hypot(s.tip.x - s.grip.x, s.tip.y - s.grip.y);
+    lo = Math.min(lo, r); hi = Math.max(hi, r);
+    const raw = at(d), rr = Math.hypot(raw.tip.x - raw.grip.x, raw.tip.y - raw.grip.y);
+    const was = raw.unit * Math.min(raw.conf, 1);        // the rule this replaced
+    rawLo = Math.min(rawLo, rr); rawHi = Math.max(rawHi, rr);
+    wasLo = Math.min(wasLo, was); wasHi = Math.max(wasHi, was);
+  }
+  ok(hi / lo - 1 < 0.08, 'and a wrist flick moves the hand, not the length of the stick',
+    `through a stroke the stick changes length by ${((hi / lo - 1) * 100).toFixed(0)}% `
+    + `(${((rawHi / rawLo - 1) * 100).toFixed(0)}% before the span filter); `
+    + `scaled by the foreshortening, as it was, ${((wasHi / wasLo - 1) * 100).toFixed(0)}%`);
+}
+{
+  /* The direction still has to be the hand's own. Two estimates go into it —
+   * the forward axis and the knuckle line's perpendicular — and the answer must
+   * agree with the forward axis wherever the forward axis is worth reading, or
+   * the blend has quietly invented an aim of its own. */
+  let worst = 0;
+  for (let d = 25; d <= 90; d += 5) {
+    for (const roll of [0, 0.5, 1.0, -0.7]) for (const yaw of [0, 0.4, -0.6]) {
+      const h = makeHand3D('r', { pitch: d * Math.PI / 180, roll, yaw });
+      const s = stickOf(h.lm, LENGTH, h.world), a = axisOf(h.lm, s.span);
+      worst = Math.max(worst, Math.acos(clamp(s.axis.x * a.x + s.axis.y * a.y, -1, 1)));
+    }
+  }
+  ok(worst < 0.10, 'and it points where the hand points, on a hand seen in three dimensions',
+    `worst ${(worst * 180 / Math.PI).toFixed(1)}° off the measured forward axis`);
+}
+{
+  /* The end that is the tip is latched, not re-decided every frame out of the
+   * weakest measurement on the hand — which is what the design before last did
+   * and why the sticks turned round mid-fill. Hold a hand at the ambiguous
+   * angle and shake it: the aim may wobble, but it must not turn over. */
+  const f = new PoseFilter();
+  f.setMode(STICK);
+  const start = makeHand3D('r', { pitch: 0.55 });
+  let s = f.update(start.lm, LENGTH, 1 / 30, start.world);
+  for (let i = 0; i < 20; i++) s = f.update(start.lm, LENGTH, 1 / 30, start.world);
+  const aimed = { x: s.axis.x, y: s.axis.y };
+  let flips = 0;
+  for (let i = 0; i < 120; i++) {
+    const h = makeHand3D('r', { pitch: 0.06 * Math.sin(i * 0.7), roll: 0.15 * Math.sin(i * 0.31) });
+    for (const k of [0, ...KN]) {           // …and tracker noise on top
+      h.lm[k].x += (rnd() - 0.5) * 0.01; h.lm[k].y += (rnd() - 0.5) * 0.01;
+    }
+    const q = f.update(h.lm, LENGTH, 1 / 30, h.world);
+    if (q.axis.x * aimed.x + q.axis.y * aimed.y < 0) flips++;
+  }
+  ok(flips === 0, 'a hand held at the ambiguous angle keeps its stick pointing the same way',
+    `${flips} of 120 frames pointed the other way`);
+}
+{
+  /* A stick turning over. Pitch a hand from aiming down-and-away to
+   * up-and-away, straight through the pose where it points at the lens, with
+   * the fist parked over a drum. The tip sweeps the length of a stick downward
+   * and then back — motion the player never made — so the detector has to
+   * refuse to hear it, which it does by refusing to strike with a stub. */
+  const kit0 = new Kit(), snare0 = kit0.byId('snare');
+  const det = new StickDetector();
+  det.setMode(STICK); det.setKit(kit0);
+  let hits = 0, sawStub = false;
+  for (let i = 0; i <= 90; i++) {
+    const pitch = (1 - i / 45) * 0.7;                 // +40° → through 0 → −40°
+    const h = makeHand3D('right', { pitch });
+    // park the fist just above the snare, whatever the pose did to it
+    const g = poseOf(h.lm, { mode: STICK, world: h.world });
+    const dx = snare0.x - g.grip.x, dy = (snare0.sy - snare0.ry * 1.4) - g.grip.y;
+    for (const p of h.lm) { p.x += dx; p.y += dy; }
+    const s = poseOf(h.lm, { mode: STICK, world: h.world });
+    if (s.reach < s.unit * 0.5) sawStub = true;
+    hits += det.update([h], i / 30).length;
+  }
+  ok(sawStub, 'turning a stick over does take it through the stub');
+  ok(hits === 0, 'and a stick turning over never sounds a drum', `${hits} phantom hits`);
 }
 {
   /* Reach is held inside a screen range, because the kit is drawn at fixed
@@ -154,8 +372,9 @@ console.log('\nstick');
   const len = (s) => Math.hypot(s.tip.x - s.grip.x, s.tip.y - s.grip.y);
   ok(Math.abs(mid.unit - mid.span * LENGTH) < 1e-6,
     'at a normal distance the stick is simply proportional to the hand', mid.unit.toFixed(3));
-  ok(Math.abs(len(mid) - mid.unit * mid.conf) < 1e-9,
-    'and what is drawn is that, projected — nothing else', len(mid).toFixed(3));
+  ok(Math.abs(len(mid) - mid.unit) < 1e-9,
+    'and what is drawn is exactly that, not that scaled by how the hand happens to be turned',
+    len(mid).toFixed(3));
   ok(near.unit < 0.27 && near.unit < near.span * LENGTH * 0.55,
     'sitting close does not hand you a caber', near.unit.toFixed(3));
   ok(far.unit > 0.10, 'and sitting back does not leave you a stub', far.unit.toFixed(3));
@@ -206,7 +425,7 @@ console.log('\nfingertip');
    * plays is one fingertip, so nothing else on the hand can set a drum off. */
   const before = poseOf(makeHand('r', { point: 1 }).lm, { mode: FINGER });
   const wild = makeHand('r', { point: 1 });
-  for (const t of [12, 16, 20]) wild.lm[t] = { x: Math.random(), y: Math.random() };
+  for (const t of [12, 16, 20]) wild.lm[t] = { x: rnd(), y: rnd() };
   const after = poseOf(wild.lm, { mode: FINGER });
   ok(after.tip.x === before.tip.x && after.tip.y === before.tip.y,
     'the other fingers cannot move it');
@@ -291,6 +510,7 @@ const swing = (t, t0, { top, bottom, fall = 0.13, hold = 0.05, lift = 0.16 }) =>
 
 function strokes(MODE) {
 console.log(`\nstrokes — ${MODE === FINGER ? 'fingertip' : 'sticks'}`);
+reseed();   // …so the two modes meet the same jitter, and so do two runs
 
 const OFF = tipOffset(MODE, SPAN);   // wrist → striking point, hand pointing down
 
@@ -478,7 +698,7 @@ const one = (opts = {}) => (t) => hand('right', {
     return n;
   };
   console.log('        a hand resting on a drum, per tracker jitter - '
-    + [0.02, 0.03, 0.04, 0.06].map((j) => `${(j * 100).toFixed(0)}%:${stillness(j)}`).join('  ') + ' spurious');
+    + [0.02, 0.03, 0.04, 0.06, 0.08, 0.10].map((j) => `${(j * 100).toFixed(0)}%:${stillness(j)}`).join('  ') + ' spurious');
   console.log('        slowest stroke still caught              - '
     + [0.2, 0.35, 0.5, 0.8].map((f) => `${f}s:${gentle(f)}/8`).join('  '));
   ok(stillness(0.03) === 0, 'realistic tracker jitter never plays a drum by itself');

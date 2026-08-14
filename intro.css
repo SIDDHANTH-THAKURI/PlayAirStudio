@@ -136,25 +136,36 @@ body.leaving .wash-layer{opacity:1;transition:opacity .55s var(--ease)}
   box-shadow:0 0 8px 1px rgba(var(--cyan-rgb),.9);animation:beat 2.8s var(--ease-io) infinite}
 @keyframes beat{0%,100%{opacity:.45;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}
 
-/* Big display type. The gradient runs top-to-bottom rather than across, which
-   is the only direction that stays continuous when every letter is its own box
-   being animated independently.
-
-   `line-height` is generous — 1.22 on a single line of text, which never shows
-   up as "loose leading" because there is no second line to space away from —
-   for a real reason, not a style preference: `background-clip: text` paints
-   the gradient into an offscreen layer sized to the line box, then masks it
-   with the glyphs. When the line box is shorter than the glyph ink (which a
-   tight line-height like the .94 this used to be guarantees for a display
-   serif with real descenders and swashes), the gradient layer itself doesn't
-   reach far enough to cover the full letterform, and whatever falls outside it
-   is simply gone — not hidden by overflow, painted with nothing. That's a flat,
-   hard-edged cut, not a soft crop, and it hit "y", "p", "g" here and every
-   headline built the same way below (`.spec-n`, `.shelf-title h2`). */
+/* Big display type.
+ *
+ * The clip is per WORD, with no letter spans inside it, and that's now load-
+ * bearing rather than a style choice — three different fixes in a row got
+ * chased off by this typeface before landing here:
+ *
+ *  1. Each letter used to be its own `.l` span so it could animate in on a
+ *     stagger, with the gradient clipped to that same span. Tight line-height
+ *     then clipped descenders ("y", "p", "g") flat, because `background-clip:
+ *     text` paints into an offscreen layer sized to the *line box*, not the
+ *     glyph ink — raising line-height fixed that.
+ *  2. It didn't fix the swashes. Fraunces' italic is drawn with real
+ *     calligraphic flourishes — the loop on "d", the curl on "S" — that go
+ *     *outside* the font's own ascent metrics on purpose, which line-height
+ *     has no way to know about. Padding bought some of it back.
+ *  3. Padding still didn't fix the "i" dot getting clipped on its *left*
+ *     edge. Italic glyphs routinely draw ink past their own advance width —
+ *     that's what "italic" mostly *is* — so the box a single letter clips to
+ *     is too narrow on the sides as well as too short top and bottom, and
+ *     there's no fixed padding that converges on that for every letter.
+ *
+ * Moving the gradient up to the whole word sidesteps all three at once, the
+ * same way `.shelf-title h2` always has: one clip across one continuous run
+ * of real text has no per-letter box for anything to escape. The cost is the
+ * animation — a `.w` can't itself be an unboxed run of text (needed for the
+ * clip to reach it) *and* contain one (needed to receive `transform`), so the
+ * per-letter cascade is gone. What's left is a per-word stagger instead. */
 .wordmark,.title{
   font-family:var(--disp);font-weight:500;line-height:1.22;letter-spacing:-.035em;
-  display:flex;flex-wrap:wrap;justify-content:center;gap:0 .22em;margin:-.09em 0}
-.wordmark .w,.title .w{display:inline-flex}
+  display:flex;flex-wrap:wrap;justify-content:center;gap:0 .22em;margin:-.1em 0}
 .wordmark .it,.title .it{font-style:italic;letter-spacing:-.01em}
 /* Lighter stops than a title on a plain background would need, and a dark halo
    behind the glyphs on top of that: the sky underneath is a photograph, not a
@@ -162,13 +173,13 @@ body.leaving .wash-layer{opacity:1;transition:opacity .55s var(--ease)}
    violet cloud. text-shadow paints from the glyph outlines regardless of
    `-webkit-text-fill-color`, so the halo works even though the fill is a
    gradient clip. */
-.wordmark .l,.title .l{
+.wordmark .w,.title .w{
   display:inline-block;
   background-image:linear-gradient(178deg,#FFFFFF 0%,#F1EFFF 32%,#CFC4FF 66%,#A996FF 100%);
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
   text-shadow:0 2px 34px rgba(1,2,8,.65),0 14px 60px rgba(1,2,8,.5);
-  opacity:0;translate:0 .34em}
-.wordmark .it .l,.title .it .l{
+  opacity:0;translate:0 .3em}
+.wordmark .it,.title .it{
   background-image:linear-gradient(178deg,#FFFFFF 0%,#E9FCFF 28%,#A7EEF5 62%,#6FDCEA 100%)}
 
 /* ================================================================== *
@@ -215,14 +226,14 @@ html[data-locked] .threshold *{animation-play-state:paused!important}
 .threshold .wordmark{margin-top:20px;font-size:clamp(60px,13.5vw,148px)}
 /* No `filter` in this animation, on purpose. `filter: blur()` on a gradient
    text-clip element is a real Chromium bug (the composited layer's paint
-   bounds don't include the full glyph ink extents), and it clips descenders —
-   the "y" in "Play" was losing its tail. Selecting the text forced a repaint
-   outside the buggy path and made it appear whole, which is what gave it away.
-   opacity + translate alone gives the same rise-in without touching a property
-   that puts the element on a filter-effect compositing layer at all. */
-.threshold .wordmark .l{animation:letterIn 1.15s var(--ease) forwards;
-  animation-delay:calc(.34s + var(--i) * .062s)}
-@keyframes letterIn{to{opacity:1;translate:0 0}}
+   bounds don't include the full glyph ink extents), and it clipped descenders
+   before this was even a per-word animation. Selecting the text forced a
+   repaint outside the buggy path and made it appear whole, which is what gave
+   it away. opacity + translate alone gives the same rise-in without touching a
+   property that puts the element on a filter-effect compositing layer at all. */
+.threshold .wordmark .w{animation:wordIn 1.15s var(--ease) forwards;
+  animation-delay:calc(.34s + var(--i) * .16s)}
+@keyframes wordIn{to{opacity:1;translate:0 0}}
 
 .th-sub{margin:26px 0 0;max-width:430px;font-size:15px;line-height:1.72;color:var(--mist);
   animation:fadeUp 1s 1.05s var(--ease) both}
@@ -331,8 +342,8 @@ body.entered .topbar{animation:fadeUp .8s .1s var(--ease) forwards}
 body.entered .hero-inner .eyebrow{animation:fadeUp .8s .18s var(--ease) forwards}
 
 .title{margin-top:26px;font-size:clamp(56px,11.5vw,142px)}
-body.entered .title .l{animation:letterIn 1.05s var(--ease) forwards;
-  animation-delay:calc(.26s + var(--i) * .055s)}
+body.entered .title .w{animation:wordIn 1.05s var(--ease) forwards;
+  animation-delay:calc(.26s + var(--i) * .14s)}
 /* A slow breath of light behind the headline, so the type is never inert. */
 .title::after{content:'';position:absolute;left:50%;top:34%;width:min(560px,86%);height:190px;z-index:-1;
   transform:translate(-50%,-50%);pointer-events:none;
@@ -590,7 +601,38 @@ body.entered .hint{animation:fadeUp 1s 1.8s var(--ease) forwards}
 .slot-body h3{font-family:var(--disp);font-weight:600;font-size:25px;letter-spacing:-.022em;margin:9px 0 0;color:var(--dim)}
 .slot-body p{margin:11px 0 0;font-size:13px;line-height:1.68;color:var(--faint)}
 
-.shelf-foot{margin:34px 0 0;text-align:center;font-family:var(--mono);font-size:10px;
+/* ---------- the face-blur switch ---------- */
+.privacy-row{display:flex;justify-content:center;margin:30px 0 0}
+.priv-switch{display:inline-flex;align-items:center;gap:14px;cursor:pointer;text-align:left;
+  font-family:var(--ui);color:var(--ink);padding:13px 20px 13px 16px;border-radius:16px;
+  background:linear-gradient(168deg,rgba(255,255,255,.05),rgba(255,255,255,.015));
+  border:1px solid var(--edge);backdrop-filter:blur(14px);
+  -webkit-tap-highlight-color:transparent;
+  transition:border-color .3s,background .3s,transform .3s var(--ease)}
+.priv-switch:hover{border-color:rgba(var(--cyan-rgb),.34);transform:translateY(-1px)}
+.priv-switch:focus-visible{outline:2px solid rgba(var(--cyan-rgb),.7);outline-offset:3px}
+
+.priv-track{position:relative;flex:none;width:42px;height:24px;border-radius:999px;
+  background:rgba(255,255,255,.08);border:1px solid var(--edge);
+  transition:background .3s var(--ease),border-color .3s}
+.priv-knob{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;
+  background:linear-gradient(180deg,#F4F7FF,#BFC8E8);box-shadow:0 2px 6px rgba(0,0,0,.5);
+  transition:transform .32s var(--ease),background .3s}
+.priv-switch[aria-pressed="true"] .priv-track{background:rgba(var(--cyan-rgb),.34);
+  border-color:rgba(var(--cyan-rgb),.6)}
+.priv-switch[aria-pressed="true"] .priv-knob{transform:translateX(18px);
+  background:linear-gradient(180deg,#FFFFFF,#8FE9F2)}
+
+.priv-text{display:flex;flex-direction:column;gap:2px}
+.priv-title{font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+.priv-sub{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+
+@media (max-width:620px){
+  .privacy-row{margin-top:22px}
+  .priv-switch{width:100%;padding:12px 16px}
+}
+
+.shelf-foot{margin:22px 0 0;text-align:center;font-family:var(--mono);font-size:10px;
   letter-spacing:.13em;text-transform:uppercase;color:var(--dim);line-height:1.9}
 
 /* ================================================================== *
@@ -681,7 +723,7 @@ body.entered .sound{opacity:1;pointer-events:auto;translate:0 0}
   *,*::before,*::after{
     animation-duration:.01ms!important;animation-delay:0ms!important;
     animation-iteration-count:1!important;transition-duration:.01ms!important}
-  .wordmark .l,.title .l,.eyebrow,.lede,.cta-row,.specs li,.hint,.card,.slot,
+  .wordmark .w,.title .w,.eyebrow,.lede,.cta-row,.specs li,.hint,.card,.slot,
   .topbar,.enter,.th-kicker,.th-sub,.th-foot,.aperture{
     opacity:1;translate:none;filter:none;scale:none}
   .threshold{backdrop-filter:none}

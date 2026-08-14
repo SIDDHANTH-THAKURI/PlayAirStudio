@@ -11,7 +11,8 @@
 import { NOTE_NAMES, QUALITIES, GRID_CELLS, SIGN_CELLS, specName,
   defaultGridSpecs, defaultSignSpecs } from './chords.js';
 import { SIGNS, STRUM_SIGNS } from './gestures.js';
-import { STEP_KINDS, DYNAMICS, RATES, PATTERNS, listPatterns, getPattern, saveCustom,
+import { STEP_KINDS, DYNAMICS, RATES, PATTERNS, PATTERN_GROUPS, groupOf,
+  listPatterns, getPattern, saveCustom,
   removeCustom, blankPattern, newPatternId, tokenToStep, stepToToken,
   stepsPerSecond } from './patterns.js';
 import { defaultSignPatterns } from './store.js';
@@ -34,6 +35,8 @@ export class Editors {
   constructor(S, hooks) {
     this.S = S; this.hooks = hooks;
     this.draft = null;              // pattern currently open in the editor
+    this.previewing = false;        // the editor transport is running
+    this.listPreviewId = null;      // …or a list row's ▶ is, never both
     this._bind();
   }
 
@@ -154,21 +157,49 @@ export class Editors {
   renderPatList() {
     const box = $('patList');
     box.innerHTML = '';
-    for (const p of listPatterns()) {
-      const row = h('button', 'plitem' + (this.draft && p.id === this.draft.id ? ' on' : ''));
-      row.innerHTML = `<span class="pl-name">${p.label}</span>` +
-        `<span class="pl-kind">${p.builtin ? 'built-in' : 'custom'} · ${p.steps.length}</span>`;
-      row.onclick = () => {
-        this.stopPreview();
-        // Opening a built-in hands you a copy; the original stays pristine.
-        this.draft = p.builtin ? this._copyOf(p.id) : { ...p, steps: p.steps.map((s) => (s ? { ...s } : null)) };
-        this.renderPatterns();
-      };
-      box.append(row);
+    const all = listPatterns();
+    for (const g of PATTERN_GROUPS) {
+      const rows = all.filter((p) => groupOf(p) === g.id);
+      if (!rows.length) continue;
+      box.append(h('div', 'pl-group', g.label));
+      for (const p of rows) box.append(this._patRow(p));
     }
     const add = h('button', 'plitem ghost', '<span class="pl-name">+ New pattern</span>');
     add.onclick = () => { this.stopPreview(); this.draft = blankPattern(); this.renderPatterns(); };
     box.append(add);
+  }
+
+  /**
+   * One row: the name opens it in the editor, the ▶ just plays it.
+   *
+   * Those are genuinely different intentions and used to be the same click.
+   * Auditioning a built-in meant opening it, which hands you an editable
+   * *copy* — so listening to four patterns to pick one left four "… copy"
+   * drafts behind. The ▶ previews the pattern itself and touches nothing.
+   */
+  _patRow(p) {
+    const on = this.listPreviewId === p.id;
+    const row = h('div', 'plrow' + (this.draft && p.id === this.draft.id ? ' on' : ''));
+
+    const pick = h('button', 'plitem');
+    const name = h('span', 'pl-name'); name.textContent = p.label;
+    const kind = h('span', 'pl-kind');
+    kind.textContent = `${p.builtin ? 'built-in' : 'custom'} · ${p.steps.length}`;
+    pick.append(name, kind);
+    pick.onclick = () => {
+      this.stopPreview();
+      // Opening a built-in hands you a copy; the original stays pristine.
+      this.draft = p.builtin ? this._copyOf(p.id) : { ...p, steps: p.steps.map((s) => (s ? { ...s } : null)) };
+      this.renderPatterns();
+    };
+
+    const play = h('button', 'plprev' + (on ? ' on' : ''), on ? '■' : '▶');
+    play.title = on ? `Stop ${p.label}` : `Preview ${p.label}`;
+    play.setAttribute('aria-label', play.title);
+    play.onclick = (e) => { e.stopPropagation(); this.toggleListPreview(p); };
+
+    row.append(pick, play);
+    return row;
   }
 
   renderEditor() {
@@ -316,19 +347,41 @@ export class Editors {
 
   /* ---------------- preview transport ---------------- */
 
+  /* There is one preview player, so there is one thing playing: the editor's
+     transport and the list's ▶ buttons each stop the other before starting.
+     Two callers sharing a player without that is how you get a stop that only
+     stops half of it and a bar looping with no way to silence it. */
+
   startPreview() {
     if (!this.draft?.steps.some(Boolean)) return;
+    this.stopListPreview();
     this.previewing = this.hooks.preview.start(this.draft);
     this.renderEditor();
     if (this.previewing) this._followStep();
   }
   stopPreview() {
+    this.stopListPreview();
     if (!this.previewing) return;
     this.previewing = false;
     this.hooks.preview.stop();
     cancelAnimationFrame(this._raf);
     document.querySelectorAll('#patEdit .step.now').forEach((n) => n.classList.remove('now'));
     if (!$('patModal').hidden) this.renderEditor();
+  }
+
+  /** Play a pattern straight from the list, without opening it. */
+  toggleListPreview(p) {
+    const was = this.listPreviewId;
+    this.stopPreview();                       // clears the list preview too
+    if (was === p.id || !p.steps.some(Boolean)) { this.renderPatList(); return; }
+    this.listPreviewId = this.hooks.preview.start(p) ? p.id : null;
+    this.renderPatList();
+  }
+  stopListPreview() {
+    if (!this.listPreviewId) return;
+    this.listPreviewId = null;
+    this.hooks.preview.stop();
+    if (!$('patModal').hidden) this.renderPatList();
   }
   /** Walk the playhead across the step cells while the preview loops. */
   _followStep() {

@@ -41,6 +41,24 @@ actually *pointing* (☝️ index out, other fingers in) — so drifting across 
 wall with a relaxed hand changes nothing. That gate is the whole reason the wall
 can be this big.
 
+The wall stops at 72% of the frame height rather than running to the bottom, and
+that is not spare margin. The cursor is the *fingertip* but the tracker needs
+the whole *hand*: a pointing hand carries its wrist about a quarter of a frame
+below its fingertip, and MediaPipe wants palm context below that again. The wall
+used to run to 0.90, which put the entire bottom row inside that dead band — so
+the lowest four chords were not awkward to reach, they were unreachable, and the
+hand vanished exactly where you were aiming.
+
+The measurement that matters is the *middle of the lowest drawn cell*, not its
+top edge, because the wall is painted on screen and you point at the box you can
+see. Merely clipping the row was always borderline-possible; centring on it was
+not. `test/sim.mjs` aims at that centre and requires the wrist to still be on
+screen — at the old bound it lands at 1.018, off the bottom of the frame; now it
+lands at 0.864. The bounds live in `gestures.js` rather than `main.js` so the
+test can read the real numbers instead of a fixture copy of them, and
+`render.js` draws the wall from those same two, so what is painted is exactly
+what is detectable.
+
 **Sign chords.** Five chords bound to ✋ ✌️ 🤘 👌 🤙. Where your hand *is* stops
 mattering entirely; only its shape does.
 
@@ -97,9 +115,29 @@ down/up brush, a treble-only up, a muted chunk, the bass or alternating bass, or
 any single string, at one of three dynamics. **Preview** loops it against your
 selected chord so you hear it before you commit. Save it, then bind it to any of
 the five hand signs; unbound signs keep their factory pattern, so a mix of your
-own and the defaults is the normal case. The five built-ins are read-only —
-opening one hands you a copy — which is why "switch back to the defaults" is
-always one click.
+own and the defaults is the normal case. The built-ins are read-only — opening
+one hands you a copy — which is why "switch back to the defaults" is always one
+click.
+
+The list comes in three groups, and the middle one is the point. **On the hand
+signs** is the five that are the factory defaults for ✊ ✌️ 🤘 🤙 👌. **More
+patterns** is eight more — Sway, Bollywood, Kaharwa, Sixteens, Offbeat, Anthem,
+Rumba, Cascade — that are built in but bound to *nothing*: audition them, then
+put whichever you want on whichever sign. Giving any of them a default would
+have silently taken a gesture away from whatever already had it, which is the
+whole reason they ship unbound rather than as a sixth through thirteenth sign.
+
+Every row has its own ▶. Auditioning used to mean *opening* a pattern, and
+opening a built-in hands you an editable copy — so listening to four patterns to
+choose between them left four "… copy" drafts behind. The ▶ plays the pattern
+itself and touches nothing. There is one preview player, so the editor's
+transport and the list's buttons each stop the other; two callers sharing a
+player without that is how you get a stop that only stops half of it.
+
+Built-ins are 8 or 16 steps, and that is a constraint rather than a habit: a
+copy is saved through the same validator as anything you author, and it rejects
+any bar that is neither length — so a 6- or 12-step built-in would be the one
+pattern you could never copy.
 
 ### Strum speed
 
@@ -547,8 +585,8 @@ fingers, make a fist, splay them, and those five points keep the same shape.
 far corner of the frame and checking the stick does not move by so much as a
 float.
 
-**The direction went wrong twice more before it went right,** and the two dead
-ends are worth keeping because both looked correct on paper.
+**The direction went wrong three times more before it went right,** and the
+dead ends are worth keeping because all three looked correct on paper.
 
 A stick points where the fingers would if you opened them, so the quantity
 wanted is the hand's forward axis — wrist to knuckles. Measuring it *directly*
@@ -570,31 +608,65 @@ it hard could flip, and did: a threshold between "trust the evidence" and "fall
 back to downward" is a discontinuity sitting exactly where the evidence is
 weakest. That is what "the sticks keep changing direction" was.
 
-**What works is the forward axis, straight, with no cleverness at all** — and
-being honest about the foreshortening instead of papering over it. It is a
-vector, not a line, so there is no end to choose and nothing to flip. When it
-shortens, the stick is drawn *shorter by exactly that much*, right down to
-nothing. Reliable angle, full-length stick pointing where the hand points; angle
-turning to noise, and the stick is a stub with almost nothing to swing.
+**Then the forward axis, straight, drawn shorter by exactly how foreshortened
+it is.** Honest projection, and no end to choose: it is a vector rather than a
+line, so nothing can flip, and where the direction turns to noise the stick is a
+stub with almost nothing to swing. It reads as obviously correct and it made the
+instrument unplayable, which took a hand projected from *real 3D* to see —
+because every fixture in the tests was flat, and a flat hand's forward axis
+never foreshortens at all.
 
-The zero matters. A floor under the length looks kinder and reinstates the bug:
-pitch a hand from pointing slightly down-and-away to slightly up-and-away and
-the axis passes through the camera line, where the direction genuinely
-reverses — so a stick with a minimum length snaps end for end there. Let it go
-to zero and the reversal is a stick shrinking to a point and growing back the
-other way, which is what a real one does. `test/drums.mjs` sweeps a hand
-through that pose and requires the tip to move no more than 0.016 spans between
-one step and the next; before, it jumped 1.6.
+A drummer holds the knuckles toward the lens. At a natural 30° of hand pitch
+that axis projects to half its length, at 10° to a quarter, so the tip hung a
+fraction of a stick below the fist and the kit sat somewhere the hands could not
+get to. Worse, a stroke *is* a wrist flick, so the foreshortening changes
+throughout it: measured on a projected hand pitching from 12° to 60°, the drawn
+stick more than tripled in length on the way down, and roughly two thirds of the
+tip's travel through the stroke was the stick sliding out of the fist rather
+than the hand moving. A stick that changes length when you turn your wrist is
+not being held, and that is what "the sticks aren't connected to my hand" is.
 
-It also makes the aiming rule something you can see: tip your hand further down
-at the kit and the stick gets longer.
+**What works is taking both measurements seriously, and fixing the length.**
+The forward axis and the knuckle line are the same quantity seen twice, and for
+a rigid frame under projection their image lengths satisfy `|f|² + |l|² ≥ 1` —
+they *cannot* both collapse. Whichever pose ruins one leaves the other
+broadside, and the knuckle line's perpendicular is the forward axis's own image
+direction in exactly the pose that flattens the forward axis. So the two are
+blended by which is better conditioned, and there is a well-defined direction
+everywhere.
+
+Which leaves the one bit the second attempt died on: the perpendicular's two
+ends. The difference is that the end is no longer *re-derived* from the
+collapsed axis every frame — it is latched. It is set from the forward axis
+whenever the forward axis is worth believing, held unchanged when it is not, and
+revised only after several consecutive strong frames say the hand really has
+gone over. Holding still is not a discontinuity, and a hand cannot reverse
+without first passing through the pose where it has no stick to reverse.
+
+The length is then constant, which is the whole point. On a projected hand it is
+full length at every angle from 15° to 90° — where before it ran from 40% — and
+through a stroke it varies by 4% instead of 219%. The stick still goes to zero,
+but only inside a narrow band around the genuine degeneracy, a hand within about
+13° of pointing straight down the lens. Something has to give there, because the
+image direction of a stick aimed at the camera really does reverse as it passes
+through, and a fixed-length stick would have to snap end for end; shrinking to a
+point and growing back the other way is what a real one does. `test/drums.mjs`
+sweeps a hand through that pose and requires the tip to pass *through* the fist
+rather than across it. The cost is that it now passes through quickly — a much
+larger step per frame than the old gentle fade — so `onset.js` refuses to strike
+with a stub at all, and a test pitches a hand right over above a drum and
+requires silence.
+
+The aiming rule survives intact and is easier to see: point the hand where you
+want the stick, and the stick is there, the same length it was.
 
 ### And an instrument with no stick at all
 
 All of the above is inference. The tip of a drumstick is a point on an object
-that is not there, worked out from the shape of a hand — and every scheme for
-working it out degrades as the hand turns toward the camera, because that is
-where the information goes.
+that is not there, worked out from the shape of a hand — and while pairing the
+two palm axes means the *direction* no longer degrades as the hand turns toward
+the camera, it is still a direction assembled out of five landmarks and a rule,
+and it can still be assembled wrongly.
 
 A fingertip does not have that problem. It is a landmark the tracker reports
 directly, with no geometry in between. So **Fingertip** is the other way to
@@ -633,6 +705,14 @@ fingers at once, in metric 3D when the tracker offers world landmarks, so no
 single finger can decide it and turning your hand cannot fake it. The
 thresholds sit low enough that a loose, comfortable grip counts; this gesture
 exists to put the sticks down, not to make you clench.
+
+They did not, until they were checked against a hand with real fingers on it.
+The window was measured off the flat fixture, where a "closed" hand folds its
+fingertips much further than a real one can, and on a projected hand the gate
+did not open until the fist was almost completely shut — a comfortable grip
+round an imaginary shaft read as an open hand, and the sticks were simply never
+picked up. It is moved to where a real grip lands, with a flat open hand still
+well clear of the other end.
 
 Sticks are told apart by **grip tape** in each hand's colour, wrapped from the
 butt to a little past the fist. A coloured dot does not survive motion blur; a
@@ -724,14 +804,49 @@ happened to look. That matters more than it sounds: at twenty-five looks a
 second the difference is up to forty milliseconds, applied at random, which is
 precisely what makes a steady roll sound drunk. The same stroke sampled at 20 fps
 and at 120 fps lands 2.2 ms apart in `test/drums.mjs`, on samples 50 ms apart.
-`main.js` then holds a 22 ms budget so each hit can be scheduled at its true
-moment — constant latency is something a player adapts to in seconds, jitter is
-something nobody ever adapts to.
 
 What is lost is worth naming. A stroke swung at a gap between two drums used to
 be caught by a nearest-pad search and played anyway; now it plays nothing. The
 zones above are sized so those gaps barely exist inside the kit, and the ring
 makes a miss something you can see coming rather than discover afterwards.
+
+**That interpolation is only as good as the clock under it,** and the clock was
+wrong. Landmarks were stamped with the time inference *finished*, which is a
+whole inference and a whole frame's age after the camera actually took them —
+0.5 to 17 ms of frame age here, measured, plus 15 to 50 ms of inference, and a
+different amount every frame. Every velocity was therefore measured over a
+slightly wrong interval, and the moment of contact handed to the audio clock was
+that far in the past before the hit had even been computed.
+`requestVideoFrameCallback` reports the frame's own capture time in the same
+clock as everything else, which is simply the right answer, so that is what is
+used.
+
+Detection then runs in the same turn as the inference that produced it rather
+than waiting for the next paint. That closes a smaller hole and a nastier one:
+a whole frame of delay in the ordinary case, and, whenever two looks landed
+inside one paint, a *dropped sample* — which for a detector that fires on a
+crossing between two samples is a dropped stroke, silently.
+
+What is left is a budget rather than a delay. The detector knows when the tip
+crossed the head to well inside a frame, so a hit handed over before that
+instant plus the budget lands at a fixed offset from the stroke however
+irregularly the tracker looked. It used to be 22 ms, on the reasonable argument
+that constant latency is something a player adapts to in seconds while jitter is
+something nobody adapts to. It was the wrong number twice over: most of the
+jitter it was aimed at is the sampling grid, which the interpolation above
+already removes, and measured in a browser at twenty looks a second only 5.6 ms
+of the 22 was ever actually reaching the audio clock — the rest had been spent
+on delivery before it could be used, while still costing the full 22 on any
+machine fast enough to arrive early. Cut to 10, the app's own contribution
+measured flat at 4.1 ms with a spread of 0.4, where it had been 4 to 21.
+
+None of which is the headline number, and the panel now says so. Contact to
+sound is dominated by the wait for the look that reveals the crossing — half a
+sample interval — plus the inference that look costs. The reported figure used
+to quote the first of those and quietly omit the second, and to infer the
+tracking rate from how fast inference *could* finish rather than counting how
+often the detector was actually fed. Both are fixed, which makes the number
+larger and true.
 
 **Rearming is a lift, and it is measured as travel.** Coming back up is what
 reloads the stroke, which is how drumming works anyway. The subtle part is that
@@ -754,15 +869,22 @@ alone is meaningless — it is easy to catch a gentle stroke, and easy to reject
 noise, and the whole problem is doing both:
 
 ```
-a hand resting on a drum, per tracker jitter - 2%:0  3%:0  4%:0  6%:0 spurious
-slowest stroke still caught                  - 0.2s:8/8  0.35s:8/8  0.5s:8/8  0.8s:5/8
+a hand resting on a drum, per tracker jitter - 2%:0 3%:0 4%:0 6%:0 8%:0 10%:0 spurious
+slowest stroke still caught                  - 0.2s:8/8  0.35s:8/8  0.5s:8/8  0.8s:8/8
 caught per tracking rate — 60fps:4/4  45fps:4/4  30fps:4/4  20fps:4/4  15fps:4/4
 ```
 
-An unhurried half-second stroke plays; a hand resting *on* a drum with 6% jitter
-does not; and because contact is caught on the frame it happens rather than
-after the stroke finishes braking, a slow tracker now costs timing rather than
-whole strokes.
+An unhurried half-second stroke plays; a hand resting *on* a drum does not, with
+the sticks silent even at ten percent jitter and the fingertip — a smaller ruler
+and a noisier landmark — giving out around eight; and because contact is caught
+on the frame it happens rather than after the stroke finishes braking, a slow
+tracker now costs timing rather than whole strokes.
+
+The jitter is drawn from a fixed seed, which sounds like housekeeping and is
+not. Unseeded, that slowest-stroke column swung between 2/8 and 6/8 across
+consecutive runs of identical code — enough noise to hide a real regression, or
+to invent one, in the one place the tests are supposed to be a measurement
+rather than a verdict.
 
 ### Smooth at sixty, tracked at twenty
 
@@ -772,12 +894,28 @@ Drawing the latest sample means the stick stands still and then jumps, and the
 eye reads that as the *instrument* being slow even when the detection underneath
 is fine.
 
-So the drawn stick follows the tracked one through a critically damped spring,
-evaluated every frame. It costs a few milliseconds of visual lag and buys none
-of it back in timing: contact is measured off the raw tip, and flashes are
-scheduled against the audio clock, so neither goes anywhere near it. The tracker
-also gives up the last tenth of its duty cycle, because at a duty of 1 the main
-thread never leaves MediaPipe and there is nothing left to paint with.
+The obvious fix is to spring the drawn stick at the tracked one, and it was the
+fix here for a while, and it is worse than the problem. A critically damped
+spring settles *behind* a moving target by twice its time constant — at the
+38 ms this ran at, 76 ms of lag on the position and 106 ms on the angle, during
+a gesture whose entire content is a fast wrist flick. So the stick on screen was
+three or four frames behind the tip that was actually striking drums: hits fired
+while the drawn stick was still visibly above the head. On an air instrument the
+drawn stick *is* the instrument, and that reads exactly as it not moving with
+your hand.
+
+So it extrapolates rather than lags. The last two poses give a velocity, and
+what is drawn is that carried forward to now — what the hand is doing between
+looks, not where it was at the last one. A much shorter spring stays, to take
+the corner off each new sample, and the target is led by its own settling time
+so the two cancel; net lag against the tracked tip is about zero. It still buys
+none of it back in timing, because contact is measured off the raw tip in the
+detection pump and flashes are scheduled against the audio clock, so neither
+goes anywhere near it. The tracker also gives up the last tenth of its duty
+cycle — which the camera makes very nearly free, since inference is paced one
+frame in either way, but browsers without `requestVideoFrameCallback` fall back
+to a timer, and there a duty of 1 means the main thread never leaves MediaPipe
+and there is nothing left to paint with.
 
 One rule holds the whole thing together: the stick that is drawn is built from
 the *detector's own* filtered pose, not recomputed alongside it. Two filters on
@@ -823,6 +961,43 @@ does), and the **middle of the ride is the bell**, the outside the bow.
 > `sin(w)`, which makes each mode's `gain` mean its actual peak amplitude
 > whatever its frequency or decay.
 
+## Playing without your face on screen
+
+**Hide my face** on the shelf blurs your face in the camera view, in all three
+instruments. It is set on the way in rather than inside each instrument, because
+the moment you want it is *before* the camera turns on; there is a matching
+switch in each instrument's header for changing your mind mid-session. The
+choice rides in `localStorage`, so it survives navigation between the pages.
+
+Two properties are load-bearing, and both are enforced rather than assumed.
+
+**Off costs nothing.** The MediaPipe bundle and the face model are behind a
+dynamic `import()` inside `enable()`, not a static import at the top of the
+file. A static one would drag the vision bundle onto the shelf — a page with no
+camera on it at all — and download the face model for every visitor whether or
+not they ever switch this on. A browser check asserts the shelf issues zero
+MediaPipe and zero `.tflite` requests.
+
+**It fails closed.** If the model will not load, if inference throws, or if the
+face is simply lost for more than a beat, the veil expands to cover the *whole*
+frame rather than snapping away. A privacy feature that silently stops
+protecting is worse than one that over-protects, because you would only find out
+afterwards, having already been on camera.
+
+What it costs when it *is* on is a second inference, and three things hold that
+down: it runs at 5 Hz rather than per frame (a head does not move like a hand),
+it backs off on its own measured cost the way `tracking.js` does, and it yields
+entirely whenever hand inference is over budget — the hands are the instrument
+and the face is decoration.
+
+It cannot disturb tracking even in principle. Hand tracking reads the raw
+`<video>` through `detectForVideo`, and the veil is a sibling DOM node with a
+`backdrop-filter`; compositing never touches the decoded frames the tracker
+sees. The veil sits at `z-index: 2` and the overlay canvas at `3`, so the blur
+covers the video and never the drawn hands or the chord wall — which also means
+the stacking had to become explicit, because relying on DOM order stopped
+working the moment anything positioned got a z-index.
+
 ## Access gate (temporary)
 
 The whole site currently sits behind `src/gate.js`, which asks for a key before
@@ -846,6 +1021,7 @@ index.html              Air Studio: threshold → landing → app shelf
 intro.css               landing-page theme (dark; the instruments are still light)
 src/intro.js            the canvas: nebula, stars, horizon, dial, strings, dust — and the scenes
 src/audio-intro.js      landing-page score and touch sounds (never loaded by the app)
+src/privacy.js          the face blur: the shared setting, and the veil that follows a face
 play.html               Air Guitar: markup, control panel, three modals
 piano.html / piano.css  Air Piano: markup and its few theme additions
 src/piano/geometry.js   calibration homography, desk ⇄ image mapping

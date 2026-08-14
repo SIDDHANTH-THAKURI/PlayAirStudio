@@ -1,10 +1,11 @@
 /** main.js — wiring: camera → tracking → contact detection → drums → audio + UI. */
 import { Tracker, Camera } from '../tracking.js';
 import { StickDetector } from './onset.js';
-import { stickFrom, fingerFrom, STICK, FINGER, LENGTH } from './stick.js';
+import { STICK, FINGER, LENGTH, BUTT } from './stick.js';
 import { Kit } from './kit.js';
 import { DrumEngine, LOOKAHEAD } from './audio.js';
 import { Overlay, HAND_COL } from './render.js';
+import { FaceVeil, faceHidden, setFaceHidden, onFaceHiddenChange } from '../privacy.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -12,6 +13,7 @@ const el = {
   stage: $('stage'), video: $('video'), canvas: $('overlay'),
   veil: $('veil'), veilCard: $('veilCard'),
   pCam: $('pillCam'), pHands: $('pillHands'), pPerf: $('pillPerf'),
+  pFace: $('pillFace'), pFaceLabel: $('pillFaceLabel'),
   hit: $('lastHit'), hitSub: $('lastHitSub'),
   camRow: $('camRow'), selCam: $('selCam'), lat: $('latNote'),
 };
@@ -55,29 +57,50 @@ const detector = new StickDetector();
 const drums = new DrumEngine();
 const overlay = new Overlay(el.canvas);
 
+/* Face blur — free until switched on; see src/privacy.js. */
+const faceVeil = new FaceVeil(el.video, el.stage);
+function paintFacePriv() {
+  const on = faceHidden();
+  el.pFace?.setAttribute('aria-pressed', String(on));
+  if (el.pFaceLabel) el.pFaceLabel.textContent = on ? 'face hidden' : 'face visible';
+  if (el.pFace) el.pFace.title = on ? 'Show my face again' : 'Blur my face in the camera view';
+}
+el.pFace?.addEventListener('click', () => setFaceHidden(!faceHidden()));
+onFaceHiddenChange((on) => { faceVeil.set(on); paintFacePriv(); });
+faceVeil.set(faceHidden());
+paintFacePriv();
+
 /* Detection rate is most of the latency — a stroke cannot be heard before the
  * frame that shows the tip through the drum — so the tracker gets nearly all of
- * the wall clock. Not *all* of it, which is the change: at a duty of 1 the main
- * thread never leaves MediaPipe, painting gets whatever is left over, and the
- * sticks stutter along at the tracking rate. The last tenth buys a steady 60fps
- * canvas, and the frame loop interpolates across the gap between looks (see
- * `frame`), so the small loss of detections costs far less than it returns. */
+ * the wall clock. Not *all* of it: the pump is driven by the camera through
+ * `requestVideoFrameCallback`, which paces inference to one frame in and makes
+ * this all but non-binding, but browsers without it fall back to a timer, and
+ * there a duty of 1 means the main thread never leaves MediaPipe and there is
+ * nothing left to paint with. The frame loop extrapolates across the gap
+ * between looks (see `frame`), so the tenth given up here is not visible. */
 tracker.duty = 0.9;
 const VIDEO = { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } };
 
 /**
  * How long after the moment of contact a hit is scheduled to sound.
  *
- * Not latency for its own sake — a *budget*, and the difference matters. The
- * detector knows when the tip crossed the head to well inside a frame, but
- * that instant has usually just passed by the time the frame is handled, and by
- * a different amount every time. Playing each hit immediately therefore smears
- * a steady roll by however irregularly the tracker happened to look. Holding a
- * couple of dozen milliseconds in hand lets every hit be placed at its true
- * moment instead. Constant latency is something a player adapts to in seconds;
- * jitter is something nobody ever adapts to.
+ * A *budget*, not latency for its own sake: the detector knows when the tip
+ * crossed the head to well inside a frame, so if the hit can be handed to the
+ * audio clock before that instant plus this, it lands at a fixed offset from
+ * the stroke however irregularly the tracker happened to look.
+ *
+ * It used to be 22 ms on the argument that jitter is worse than latency, which
+ * is true and was the wrong number twice over. Most of the jitter it was aimed
+ * at is the *sampling* grid — up to a whole frame interval of it — and
+ * interpolating the crossing between two samples (`onset.js`) already removes
+ * that. What is left is delivery: inference, and the wait for the frame to be
+ * handled, which measured 11–30 ms in a browser at 20 looks a second. So 22 ms
+ * of budget was mostly spent before it could be used — measured, an average of
+ * 5.6 ms of it actually reached the audio clock — while costing the full 22 ms
+ * on any machine fast enough to arrive early. What is left here covers the
+ * delivery jitter that a budget can still absorb, and nothing more.
  */
-const WINDOW = 0.022;
+const WINDOW = 0.010;
 
 let kit = new Kit({ scale: S.size, lefty: S.lefty });
 detector.setKit(kit);
@@ -326,16 +349,43 @@ addEventListener('resize', () => overlay.resize());
 if (window.ResizeObserver) new ResizeObserver(() => overlay.resize()).observe(el.stage);
 
 /* ---------------- detection pump ---------------- */
-let hands = [], handsSeq = 0, handsAt = 0;
+let hands = [], handsSeq = 0, handsAt = 0, looks = 0, looksAt = 0, looksRate = 0;
+
+/**
+ * When the camera actually took this frame.
+ *
+ * This was `performance.now()` sampled *after* `detect()` returned, which is a
+ * whole inference late — 18 ms on a middling laptop, and a different 18 ms
+ * every frame. Every velocity was measured over a slightly wrong interval, and
+ * worse, the moment of contact the audio clock was handed was that far in the
+ * past before the hit was even computed, so the scheduling budget below was
+ * being spent on bookkeeping error rather than on jitter.
+ *
+ * `requestVideoFrameCallback` hands over the frame's own capture time in the
+ * same clock as `performance.now()`, which is the honest answer. Believe it
+ * only if it looks like that clock: a stamp from the future or from a quarter
+ * of a second ago is a driver reporting something else entirely, and a wrong
+ * timestamp is far more damaging than a slightly late one.
+ */
+function frameTime(meta, now) {
+  const t = meta?.captureTime ?? meta?.presentationTime;
+  return typeof t === 'number' && t <= now + 1 && now - t < 250 ? t : now;
+}
+
 function pump() {
-  const step = () => {
+  const step = (nowMs, meta) => {
+    const now = typeof nowMs === 'number' ? nowMs : performance.now();
     if (S.running && !document.hidden && tracker.due()) {
-      hands = tracker.detect(el.video, performance.now());
-      // Stamp the landmarks with when they were *captured*: handing the
-      // detector a render timestamp measures the wrong interval entirely and
-      // corrupts every velocity. See the note in the piano's frame loop.
-      handsAt = performance.now() / 1000;
+      const cap = frameTime(meta, now);
+      hands = tracker.detect(el.video, cap);
+      handsAt = cap / 1000;
       handsSeq++;
+      looks++;
+      // Detect and strike in the same turn. Handing the landmarks to the frame
+      // loop instead put a whole rAF between seeing a stroke and sounding it,
+      // and dropped the sample outright whenever two looks fell inside one
+      // paint — a lost sample being a lost stroke, silently.
+      consume();
     }
     schedule();
   };
@@ -346,24 +396,20 @@ function pump() {
   schedule();
 }
 
+let lastSeq = -1, live = [];
+function consume() {
+  if (handsSeq === lastSeq) return;
+  lastSeq = handsSeq;
+  live = identify(hands);
+  for (const ev of detector.update(live.map((h) => ({ id: h.id, lm: h.lm, world: h.world })), handsAt)) strike(ev);
+}
+
 /* ---------------- frame loop ---------------- */
-let fps = 60, lastF = performance.now(), tick = 0, lastSeq = -1, rate = 0, live = [];
+let fps = 60, lastF = performance.now(), tick = 0, rate = 0;
 
 /**
  * Critically damped follower — the standard implicit spring, which is stable at
  * any step size and cannot overshoot.
- *
- * This is what makes the sticks look like objects rather than like tracking
- * data. Landmarks arrive whenever inference finishes, which on a laptop is
- * twenty-something times a second and never evenly; the canvas paints sixty
- * times a second. Drawing the latest sample means the stick stands still and
- * then jumps, and the eye reads that as the *instrument* being slow even when
- * the detection underneath is fine. A spring keeps moving between samples, so
- * what you see is continuous motion.
- *
- * It costs a few milliseconds of visual lag and buys none of it back in
- * timing: contact is measured off the raw tip, and the flashes are scheduled
- * against the audio clock, so neither goes anywhere near this.
  */
 function spring(p, v, target, tau, dt) {
   const w = 1 / Math.max(tau, 1e-4);
@@ -372,7 +418,42 @@ function spring(p, v, target, tau, dt) {
   const det = 1 / (f + hhoo);
   return [(f * p + dt * v + hhoo * target) * det, (v + hoo * (target - p)) * det];
 }
-const FOLLOW = 0.038;   // s for the drawn stick to settle onto the tracked one
+
+/**
+ * How the drawn stick keeps up with the tracked one — and why it is not simply
+ * sprung at it.
+ *
+ * The problem is real: landmarks arrive whenever inference finishes, twenty-odd
+ * times a second and never evenly, while the canvas paints sixty times a
+ * second. Drawing the newest sample means the stick stands still and then
+ * jumps, and the eye reads that as the *instrument* being slow even when the
+ * detection underneath is fine.
+ *
+ * A spring fixes the stutter and introduces something worse. A critically
+ * damped one settles behind a moving target by `2·tau` — at the 38 ms this used
+ * to run at, that is 76 ms of lag on the position and 106 ms on the angle,
+ * during a gesture whose whole point is a fast wrist flick. So the stick on
+ * screen was three or four frames behind the tip that was actually striking
+ * drums: hits fired while the drawn stick was still visibly above the head. On
+ * an air instrument the drawn stick *is* the instrument, and that reads exactly
+ * as "it doesn't move with my hand".
+ *
+ * So: **extrapolate rather than lag**. The last two detector poses give a
+ * velocity; the drawn pose is that carried forward to now — which is what the
+ * hand is doing between looks, not where it was at the last one. The spring
+ * stays, at a fraction of the time constant, purely to take the corner off each
+ * new sample, and the target is led by its own settling time so the two cancel.
+ * Net lag against the tracked tip is about zero instead of 76 ms.
+ *
+ * None of it touches timing: contact is measured off the raw tip in the pump,
+ * and flashes are scheduled against the audio clock.
+ */
+const FOLLOW = 0.014;          // s of smoothing on the drawn pose…
+const LEAD = 2 * FOLLOW;       // …and the lead that cancels its lag
+const COAST = 1.8;             // sample intervals the extrapolation may run for
+
+/** Carry a point forward past `b` by `k` of the interval that got it there. */
+const coast = (a, b, k) => ({ x: b.x + (b.x - a.x) * k, y: b.y + (b.y - a.y) * k });
 
 /* Per-hand display state: where the drawn stick has got to, how far it has been
  * raised, and how fast the tip is travelling for the trail. Kept here rather
@@ -384,14 +465,6 @@ function frame() {
   const nowMs = performance.now(), t = nowMs / 1000;
   const dt = clamp((nowMs - lastF) / 1000, 0.001, 0.1);
   fps = fps * 0.93 + (1 / dt) * 0.07; lastF = nowMs;
-
-  // Detection-rate driven: feeding the detector the same landmarks twice would
-  // read as zero motion and flatten every stroke.
-  if (S.running && handsSeq !== lastSeq) {
-    lastSeq = handsSeq;
-    live = identify(hands);
-    for (const ev of detector.update(live.map((h) => ({ id: h.id, lm: h.lm, world: h.world })), handsAt)) strike(ev);
-  }
 
   const sticks = [];
   const seen = new Set();
@@ -407,29 +480,42 @@ function frame() {
 
     let L = look.get(h.id);
     if (!L) {
-      L = { hold: 0, speed: 0, vel: { x: 0, y: 0 }, prev: null,
-            x: st.grip.x, y: st.grip.y, vx: 0, vy: 0,
-            ax: st.axis.x, ay: st.axis.y, dax: 0, day: 0, span: st.span };
+      L = { hold: 0, speed: 0, vel: { x: 0, y: 0 }, prev: null, seq: -1, p0: null, p1: null,
+            gx: st.grip.x, gy: st.grip.y, gvx: 0, gvy: 0,
+            tx: st.tip.x, ty: st.tip.y, tvx: 0, tvy: 0 };
       look.set(h.id, L);
     }
-    let drawn;
-    if (S.mode === STICK) {
-      [L.x, L.vx] = spring(L.x, L.vx, st.grip.x, FOLLOW, dt);
-      [L.y, L.vy] = spring(L.y, L.vy, st.grip.y, FOLLOW, dt);
-      // The axis is sprung as a vector rather than as an angle: the stick can
-      // point anywhere, and an angle would have to be unwrapped at every turn.
-      [L.ax, L.dax] = spring(L.ax, L.dax, st.axis.x, FOLLOW * 1.4, dt);
-      [L.ay, L.day] = spring(L.ay, L.day, st.axis.y, FOLLOW * 1.4, dt);
-      L.span += (st.span - L.span) * (1 - Math.exp(-dt / 0.12));
-      drawn = stickFrom({ grip: { x: L.x, y: L.y }, axis: { x: L.ax, y: L.ay, conf: st.conf }, span: L.span }, S.reach);
-    } else {
-      /* A fingertip is drawn exactly where the tracker says it is. The spring
-       * exists because a *derived* pose stutters between looks at the hands;
-       * a landmark does too, but smoothing it would move the striking point
-       * away from the one the detector is using, and on the tip of the finger
-       * you are aiming with that is worse than a little stutter. */
-      drawn = fingerFrom(h.lm, st.span);
+    /* Two poses and their stamps are all the extrapolation needs. Both come
+     * from the detector, so the drawn stick is still the detector's own stick
+     * and not a second opinion computed from the same landmarks — two filters
+     * on one hand drift apart, and then the stick you aim with is not the stick
+     * that hits. */
+    if (L.seq !== handsSeq) {
+      L.seq = handsSeq;
+      L.p1 = L.p0 || { t: handsAt, grip: st.grip, tip: st.tip };
+      L.p0 = { t: handsAt, grip: st.grip, tip: st.tip };
     }
+    const gap = L.p0.t - L.p1.t;
+    const k = gap > 1e-4 ? clamp((t + LEAD - L.p0.t) / gap, 0, COAST) : 0;
+    const wantG = coast(L.p1.grip, L.p0.grip, k), wantT = coast(L.p1.tip, L.p0.tip, k);
+    [L.gx, L.gvx] = spring(L.gx, L.gvx, wantG.x, FOLLOW, dt);
+    [L.gy, L.gvy] = spring(L.gy, L.gvy, wantG.y, FOLLOW, dt);
+    [L.tx, L.tvx] = spring(L.tx, L.tvx, wantT.x, FOLLOW, dt);
+    [L.ty, L.tvy] = spring(L.ty, L.tvy, wantT.y, FOLLOW, dt);
+
+    /* Rebuilt around those two points rather than re-derived from the pose, so
+     * whatever the geometry did — including a stick shrinking through the
+     * degenerate angle — is carried through exactly. */
+    const rx = L.tx - L.gx, ry = L.ty - L.gy;
+    const reach = Math.hypot(rx, ry), m = reach || 1;
+    const drawn = {
+      ...st, reach,
+      grip: { x: L.gx, y: L.gy }, tip: { x: L.tx, y: L.ty },
+      axis: { x: rx / m, y: ry / m },
+      butt: st.mode === STICK
+        ? { x: L.gx - (rx / m) * reach * BUTT, y: L.gy - (ry / m) * reach * BUTT }
+        : { x: L.gx, y: L.gy },
+    };
 
     // Picking a stick up and putting it down is eased rather than switched, so
     // it reads as a movement instead of a graphic appearing.
@@ -462,18 +548,35 @@ function frame() {
           : 'Point one index finger, the others tucked in',
   });
 
+  // Timing is the whole performance here, so the face yields to the hands.
+  faceVeil.tick(nowMs, tracker.emaMs > 45);
+
   if (++tick % 20 === 0) {
-    rate = tracker.emaMs > 0 ? Math.min(1000 / tracker.emaMs * tracker.duty, 60) : 0;
+    /* Counted, not inferred. `1000 / emaMs × duty` is how often inference
+     * *could* finish; what the detector actually gets is bounded by the camera
+     * on top of that, and quoting the wrong one of the two flatters the figure
+     * exactly when the instrument is struggling. */
+    if (looksAt) looksRate = looksRate ? looksRate * 0.7 + (looks / ((nowMs - looksAt) / 1000)) * 0.3
+      : looks / ((nowMs - looksAt) / 1000);
+    looksAt = nowMs; looks = 0;
+    rate = looksRate;
     el.pPerf.textContent = `${Math.round(fps)} fps · track ${rate.toFixed(0)}/s · ${tracker.emaMs.toFixed(0)} ms ${tracker.delegate.toLowerCase()}`;
     el.pPerf.classList.toggle('bad', rate > 0 && rate < 20);
     if (el.lat) {
-      /* Be honest about where the delay comes from. Contact is caught on the
-       * frame it happens rather than after the stroke has finished, so the
-       * tracking share is now the average wait for the *next* look — half a
-       * sample interval — rather than a whole stroke's braking distance. */
-      const detect = rate > 0 ? 500 / rate : 0;
+      /* Be honest about where the delay comes from, all of it. Contact is
+       * caught on the frame it happens, so the tracker's share is the average
+       * wait for the look that reveals the crossing — half a sample interval —
+       * plus the inference that look then costs before anything can be done
+       * with it. That second term was quietly missing, and it is the larger of
+       * the two on a machine without a usable GPU. */
+      const detect = rate > 0 ? 500 / rate + tracker.emaMs : 0;
+      /* The window is a *budget*, not a delay, so quoting all of it overstates
+       * the figure on every machine that spends it before it can be used —
+       * which is most of them. What is actually added is whatever is left of it
+       * once the stroke has waited this long to be seen. */
+      const audio = Math.max(LOOKAHEAD, WINDOW - detect / 1000) * 1000;
       el.lat.innerHTML = rate === 0 ? '—'
-        : `≈<b>${Math.round(detect + (WINDOW + LOOKAHEAD) * 1000)} ms</b> · ${Math.round(detect)} tracking + ${Math.round((WINDOW + LOOKAHEAD) * 1000)} audio`
+        : `≈<b>${Math.round(detect + audio)} ms</b> · ${Math.round(detect)} tracking + ${Math.round(audio)} audio`
           + (tracker.delegate === 'CPU' ? ' · <span class="warn">GPU off — see How to play</span>' : '');
     }
     if (stageDrifted()) syncStage();

@@ -325,6 +325,31 @@ const POINT_DWELL = 0.16;   // s of steady pointing before a grid cell commits
 const SIGN_DWELL  = 0.25;   // s a sign must settle before its chord takes over
 const CELL_HYST   = 0.28;   // fraction of a cell you must pass to change cell
 
+/**
+ * The chord wall's vertical bounds, and the reason the lower one is not 0.9.
+ *
+ * The cursor is the index *fingertip*, but the tracker needs the whole *hand*.
+ * Those two facts fight each other at the bottom of the frame: a pointing hand
+ * carries its wrist roughly a quarter of a frame-height below its fingertip,
+ * and MediaPipe wants palm context below that again. So aiming a fingertip at
+ * 0.8 puts the wrist at the very edge and the hand is dropped — precisely
+ * where you were trying to point.
+ *
+ * The old 0.90 bound put the whole last row (0.63–0.90) inside that dead band,
+ * which is why the bottom four chords could not be selected at all rather than
+ * merely being awkward. 0.72 keeps the row you must *enter* at ~0.51, which
+ * leaves the wrist a comfortable margin of frame beneath it — `test/sim.mjs`
+ * pins that down by pointing with the wrist held at 0.90 and requiring a
+ * bottom-row cell to commit.
+ *
+ * These live here rather than in main.js because the constraint is a tracking
+ * fact, not a drawing one — and because main.js touches the DOM at import, so
+ * a test could never read them from there. `render.js` draws the wall from the
+ * same two numbers, so what is painted is exactly what is detectable.
+ */
+export const GRID_Y0 = 0.08;
+export const GRID_Y1 = 0.72;
+
 class FretHand extends HandBase {
   constructor() {
     super();

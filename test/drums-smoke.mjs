@@ -237,7 +237,9 @@ try {
       if (airDrums.S.mode === 'finger') return { dx: -0.34 * span, dy: 1.85 * span };
       const sp = span * 1.006, k = airDrums.S.reach / 1.9;
       const unit = clamp(sp * airDrums.S.reach, 0.11 * k, 0.26 * k);
-      return { dx: 0, dy: span * 0.74 + unit * (span / sp) };   // …× how foreshortened
+      // …and the stick is now full length whatever the pose, so the only thing
+      // left on the end of it is the aim direction's own downward component.
+      return { dx: 0, dy: span * 0.74 + unit * (span / sp) };
     };
 
     /* One stroke's tip height over time: wait above the head, come down
@@ -272,10 +274,15 @@ try {
     // figure would hold the pump to a few looks a second; real hardware never
     // trips this, and the throttle is not what this test is about.
     airDrums.tracker.due = () => true;
-    airDrums.tracker.detect = () => {
+    /* Pose the hand at the moment the app says the frame was *taken*, not at
+     * the moment the stub happened to run. The app now stamps landmarks with
+     * the camera frame's own capture time and hands it to detect(), so a stub
+     * that ignored it would be describing a hand from a slightly different
+     * instant than the one every velocity below is then measured over. */
+    airDrums.tracker.detect = (video, tsMs) => {
       if (!window.__schedule.length) return [];
       window.__det++;
-      const t = performance.now() / 1000 - window.__t0;
+      const t = (typeof tsMs === 'number' ? tsMs : performance.now()) / 1000 - window.__t0;
       const off = offset();
       /* One hand per *hand*. Returning a hand for every scheduled stroke puts
        * four of them in frame at once, all with the same handedness label, and
@@ -340,9 +347,14 @@ try {
     await sleep(secs * 1000);
     const take = { hits: await evl('window.__hits'), det: await evl('window.__det'),
                    blooms: await evl('window.__blooms'), raw: await evl('window.__raw') };
-    // Below about four looks a second a stroke can begin and finish between two
-    // of them, and every assertion below would be about the camera.
-    if (take.det / secs < 4) stalled = true;
+    /* Below about ten looks a second a scripted stroke — 0.22 s of fall — can
+     * begin and finish between two of them, and every assertion below would be
+     * about the camera rather than the app. The floor was four, which is the
+     * rate at which the take is *hopeless* rather than the rate at which it
+     * stops being evidence: a take that limped in at seven looks a second
+     * reported two hits out of four and failed, and the fake webcam having
+     * quietly given up halfway is not a finding. */
+    if (take.det / secs < 10) stalled = true;
     return take;
   };
 

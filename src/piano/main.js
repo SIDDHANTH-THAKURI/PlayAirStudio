@@ -6,6 +6,7 @@ import { Keyboard, SCALES, NOTE_NAMES, midiName } from './scales.js';
 import { PianoEngine, LOOKAHEAD } from './audio.js';
 import { Overlay, HAND_COL } from './render.js';
 import { Tour } from './tour.js';
+import { FaceVeil, faceHidden, setFaceHidden, onFaceHiddenChange } from '../privacy.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -13,6 +14,7 @@ const el = {
   stage: $('stage'), video: $('video'), canvas: $('overlay'),
   veil: $('veil'), veilCard: $('veilCard'),
   pCam: $('pillCam'), pHands: $('pillHands'), pPerf: $('pillPerf'),
+  pFace: $('pillFace'), pFaceLabel: $('pillFaceLabel'),
   note: $('lastNote'), noteSub: $('lastNoteSub'), calBtn: $('calBtn'),
   calBar: $('calBar'), calUse: $('calUse'), calCancel: $('calCancel'), calReset: $('calReset'),
   calHint: $('calHint'), camRow: $('camRow'), selCam: $('selCam'), lat: $('latNote'),
@@ -63,6 +65,19 @@ const tracker = new Tracker(), camera = new Camera(el.video);
 const detector = new TapDetector();
 const piano = new PianoEngine();
 const overlay = new Overlay(el.canvas);
+
+/* Face blur — free until switched on; see src/privacy.js. */
+const faceVeil = new FaceVeil(el.video, el.stage);
+function paintFacePriv() {
+  const on = faceHidden();
+  el.pFace?.setAttribute('aria-pressed', String(on));
+  if (el.pFaceLabel) el.pFaceLabel.textContent = on ? 'face hidden' : 'face visible';
+  if (el.pFace) el.pFace.title = on ? 'Show my face again' : 'Blur my face in the camera view';
+}
+el.pFace?.addEventListener('click', () => setFaceHidden(!faceHidden()));
+onFaceHiddenChange((on) => { faceVeil.set(on); paintFacePriv(); });
+faceVeil.set(faceHidden());
+paintFacePriv();
 
 /* Detection rate *is* the latency here, so the piano spends everything on it.
  *
@@ -577,6 +592,10 @@ function frame() {
     hands: overlayHands, showNames: S.names,
     rate, lowRate: rate > 0 && rate < 20,
   });
+
+  // The piano spends everything on detection rate, so the face yields harder
+  // here than anywhere else — see the latency note in the README.
+  faceVeil.tick(nowMs, tracker.emaMs > 45);
 
   if (++tick % 20 === 0) {
     rate = tracker.emaMs > 0 ? Math.min(1000 / tracker.emaMs * tracker.duty, 60) : 0;

@@ -33,15 +33,43 @@
  * flipped end over end, and between flips it wandered. That is what "keeps
  * changing direction" was.
  *
- * **Now: the hand's forward axis, straight, with no cleverness.** Wrist to
- * knuckles, in the image, which is unambiguous — it is a vector, not a line, so
- * there is no end to choose and nothing to flip. It really does foreshorten
- * when the hand points at the camera, and the answer is to be honest about it
- * rather than to paper over it: the stick is drawn *shorter* by exactly how
- * foreshortened its direction is. When the angle is reliable the stick is full
- * length and points where the hand points; when the angle is turning to noise
- * the stick is a stub, so the noise has almost nothing to swing. The player can
- * see it happen and tilt their hand down, which is the fix.
+ * **Third attempt: the forward axis, straight, drawn shorter by exactly how
+ * foreshortened it is.** Continuous, unflippable, and honest — and unplayable,
+ * which took a projected 3D hand to see rather than a flat fixture. The pose
+ * this instrument is actually played in holds the knuckles toward the lens, so
+ * the axis projects to *half* its length at a natural 30° of hand pitch and a
+ * quarter at 10°. Two things follow, and both are the complaint that "the
+ * sticks aren't connected to my hand". The tip hangs a fraction of a stick
+ * below the fist instead of a stick, so the kit is out of reach unless you
+ * hold your hand at an angle nobody holds it at. And a stroke *is* a wrist
+ * flick, so the foreshortening changes through every stroke: measured on a
+ * projected hand pitching from 12° to 60°, the tip travels 0.19 of the screen
+ * of which 0.12 — nearly two thirds — is the stick telescoping in and out of
+ * the fist rather than the hand moving. A stick that changes length when you
+ * turn your wrist is not being held.
+ *
+ * **Now: two estimates of one direction, and a length that does not move.**
+ * The forward axis and the knuckle line are the same measurement seen twice.
+ * For a rigid frame under projection their image lengths satisfy
+ * `|f|² + |l|² = 1 + n_z² ≥ 1`, so they cannot both collapse: whichever pose
+ * ruins one leaves the other broadside. The knuckle line's perpendicular is
+ * the forward axis's own image direction whenever that line lies in the image
+ * plane — which is exactly the pose that flattens the forward axis — so the
+ * two are blended by which is better conditioned, and the direction is well
+ * defined everywhere.
+ *
+ * That leaves the one bit the second attempt died on: a perpendicular has two
+ * ends. It is *not* re-derived from the collapsed axis every frame, which is
+ * what flipped; it is a latch, set from the forward axis whenever the forward
+ * axis is worth believing and simply held when it is not. Sitting still is not
+ * a discontinuity, and a hand cannot reverse without first passing through the
+ * pose where it has no stick at all.
+ *
+ * The length is then constant — the reason for all of the above. It shrinks
+ * only inside a narrow band around the genuine degeneracy (a hand within about
+ * 13° of pointing straight down the lens), where a real stick really is a dot,
+ * and where the reversal has to happen if it is going to happen. Everywhere a
+ * drum can be reached from, the tip sits a fixed distance from the fist.
  *
  * Nothing in the stick geometry reads a finger joint. Everything comes from the
  * wrist and the four knuckles, which are rigid: curl your fingers, make a fist,
@@ -57,7 +85,7 @@ const smooth = (v, a, b) => { const u = inv(v, a, b); return u * u * (3 - 2 * u)
 const WRIST = 0;
 const MCP = [5, 9, 13, 17];
 const TIP = [8, 12, 16, 20];
-const INDEX_MCP = 5, INDEX_TIP = 8;
+const INDEX_MCP = 5, INDEX_TIP = 8, PINKY_MCP = 17;
 
 /** Pairs across the palm, used to measure the hand without trusting any one. */
 const RULERS = [[0, 5], [0, 9], [0, 13], [0, 17], [5, 9], [9, 13], [13, 17], [5, 17]];
@@ -95,7 +123,37 @@ const REACH_MIN = 0.11, REACH_MAX = 0.26;
 const UNIT_MIN = 0.065, UNIT_MAX = 0.170;
 
 /** How far the butt pokes back out of the fist, as a fraction of the reach. */
-const BUTT = 0.32;
+export const BUTT = 0.32;
+
+/**
+ * The knuckle line, index to pinky, as a fraction of a palm span — the ruler
+ * its own foreshortening is measured against. Nominal on purpose: it is only
+ * ever compared with the forward axis's conditioning to decide which of the two
+ * to lean on, so being a few percent out for a particular hand costs nothing.
+ */
+const KNUCKLES = 0.75;
+
+/**
+ * How far the forward axis has to project before it is trusted on its own,
+ * and the band over which it hands over to the knuckle line's perpendicular.
+ * Both are estimates of the same direction, so the blend is not a compromise
+ * between two answers — it is a weighted average of two measurements of one.
+ */
+const TRUST_LO = 0.14, TRUST_HI = 0.46;
+
+/**
+ * …and the far narrower band in which the stick genuinely has no length.
+ *
+ * A hand more than about 13° off the camera's own axis (`conf` ≥ `DEGEN_HI`)
+ * gets a full-length stick, which is every pose a drum can be reached from.
+ * Inside the band the stick shrinks toward a point, because that is what a real
+ * one does when you aim it at the lens — and because a reversal has to happen
+ * somewhere, and this is the only place it can happen continuously.
+ */
+const DEGEN_LO = 0.05, DEGEN_HI = 0.22;
+
+/** The end that is the tip is only revised on evidence this strong, held this long. */
+const SIGN_TRUST = 0.30, SIGN_HOLD = 3;
 
 /** Hand size changes on nobody's timescale, so it is smoothed far harder than pose. */
 const SPAN_TAU = 0.14;
@@ -148,7 +206,8 @@ export function spanOf(lm, world = null) {
  * `conf` is the axis's length measured against the rotation-proof span: about 1
  * for a hand seen broadside, falling toward 0 as it turns to point at the
  * camera. It is not a fudge factor — it is the honest statement that this
- * direction is a projection, and it is what the drawn length is scaled by.
+ * direction is a projection, and it is what decides how much of the aim below
+ * comes from here rather than from the knuckle line.
  */
 export function axisOf(lm, span) {
   let x = 0, y = 0;
@@ -158,6 +217,54 @@ export function axisOf(lm, span) {
   const m = Math.hypot(x, y);
   if (!(m > 1e-6)) return { x: 0, y: 1, conf: 0 };
   return { x: x / m, y: y / m, conf: clamp(m / span, 0, 1.2) };
+}
+
+/**
+ * The line across the knuckles, and how broadside it is.
+ *
+ * The widest part of the hand, and the one measurement that is *longest*
+ * precisely when the forward axis is shortest — a fist aimed at the lens hides
+ * its length and shows its width.
+ */
+export function knuckleOf(lm, span) {
+  const x = lm[PINKY_MCP].x - lm[INDEX_MCP].x, y = lm[PINKY_MCP].y - lm[INDEX_MCP].y;
+  const m = Math.hypot(x, y);
+  if (!(m > 1e-6)) return { x: 1, y: 0, conf: 0 };
+  return { x: x / m, y: y / m, conf: clamp(m / (span * KNUCKLES), 0, 1.2) };
+}
+
+/**
+ * Where the stick points, from both measurements at once.
+ *
+ * `sign` is the caller's latch — which end of the knuckle line's perpendicular
+ * is the tip. Pass 0 and the current forward axis decides, which is right for a
+ * one-off call and not enough over time; `PoseFilter` keeps the latch and is
+ * what the instrument actually uses.
+ *
+ * The returned `vote` is what the forward axis says the sign should be, and
+ * `conf` is how much that vote is worth. Deciding is deliberately left to the
+ * caller: the whole failure of the second design was making that decision
+ * afresh every frame out of the weakest evidence on the hand.
+ */
+export function aimOf(lm, span, sign = 0) {
+  const f = axisOf(lm, span), k = knuckleOf(lm, span);
+  // Perpendicular to the knuckle line — the forward axis's own image direction
+  // whenever that line lies in the image plane, which is the pose that flattens
+  // the forward axis. Two ends; the latch picks one.
+  let px = -k.y, py = k.x;
+  const vote = Math.sign(px * f.x + py * f.y) || 1;
+  const s = (f.conf > SIGN_TRUST ? vote : (sign || vote)) < 0 ? -1 : 1;
+  px *= s; py *= s;
+  /* Co-orient before blending. Below `SIGN_TRUST` the forward axis is not
+   * trusted to *choose* the end, so it must not be allowed to vote against the
+   * latch by cancelling it out either — that would leave a near-zero vector
+   * whose direction is pure noise, which is the failure being avoided. */
+  const agree = px * f.x + py * f.y < 0 ? -1 : 1;
+  const w = f.conf <= 0 ? 0 : smooth(f.conf, TRUST_LO, TRUST_HI);
+  const x = f.x * agree * w + px * (1 - w), y = f.y * agree * w + py * (1 - w);
+  const m = Math.hypot(x, y);
+  if (!(m > 1e-6)) return { x: px, y: py, conf: f.conf, lat: k.conf, vote, sign: s };
+  return { x: x / m, y: y / m, conf: f.conf, lat: k.conf, vote, sign: s };
 }
 
 /**
@@ -189,17 +296,24 @@ function ruler(lm, world) {
  * How closed this hand is, 0 (flat open) to 1 (fist) — the stick-mode grip.
  *
  * All four fingers, measured against the palm's own length so it is a shape
- * rather than a size. A hand held flat to the camera reaches about 0.78 of a
- * palm length; the same hand curled reaches about 0.3. The thresholds sit
- * between, low enough that the loose, comfortable grip a drummer actually uses
- * counts as holding — this gesture exists to put the sticks *down*, not to make
- * you clench.
+ * rather than a size. A hand held flat reaches about 0.8 of a palm length; the
+ * same hand shut hard reaches about 0.35. The thresholds sit between, low
+ * enough that the loose, comfortable grip a drummer actually uses counts as
+ * holding — this gesture exists to put the sticks *down*, not to make you
+ * clench.
+ *
+ * The window used to be 0.44…0.70, which was measured off a flat fixture and
+ * meant it. On a hand projected from real 3D the fingers never fold that far:
+ * the gate did not open until the fist was almost completely shut, and a
+ * comfortable grip round an imaginary shaft read as an open hand — the sticks
+ * were simply not picked up. Moved up to where a real grip lands, with a flat
+ * open hand still well clear of the far end.
  */
 export function closeOf(lm, world = null) {
   const { d, ref } = ruler(lm, world);
   let reach = 0;
   for (let i = 0; i < MCP.length; i++) reach += d(MCP[i], TIP[i]) / ref;
-  return 1 - inv(reach / MCP.length, 0.44, 0.70);
+  return 1 - inv(reach / MCP.length, 0.50, 0.78);
 }
 
 /**
@@ -237,18 +351,23 @@ export function stickFrom({ grip, axis, span }, length = LENGTH) {
   const ax = axis.x / m, ay = axis.y / m;
   const conf = axis.conf ?? 1;
   const unit = reachOf(span, length);
-  /* Straight projection, right down to nothing.
+  /* Fixed, except where a stick genuinely has no length.
    *
-   * A floor under this looks kinder and is worse. Pitch a hand from pointing
-   * slightly down-and-away to slightly up-and-away and its axis passes through
-   * the camera line, where the direction genuinely reverses — so a stick with a
-   * minimum length snaps end for end at that instant, which is the flip all
-   * over again, just moved somewhere less obvious. Let the length go to zero
-   * with it and the reversal is a stick shrinking to a point and growing back
-   * the other way, which is what a real one does and is perfectly continuous.
-   * It also makes the aiming rule legible: tip your hand further down at the
-   * kit and the stick gets longer. */
-  const reach = unit * clamp(conf, 0, 1);
+   * Scaling this by the foreshortening straight — which is what the version
+   * before this did — is honest projection and an unplayable instrument: at the
+   * hand angles a kit is actually played at it costs half the stick, and since
+   * a stroke is a wrist flick it costs a *different* half from one frame to the
+   * next, so most of the tip's motion during a stroke is the stick sliding in
+   * and out of the fist. Fixed length is what makes the tip read as attached.
+   *
+   * The shrink survives only inside `DEGEN_LO…DEGEN_HI`, a hand within about
+   * 13° of pointing down the lens. Something has to give there: the image
+   * direction of a stick aimed at the camera genuinely reverses as it passes
+   * through, and a fixed-length stick would have to snap end for end. Letting
+   * it shrink to a point and grow back the other way is what a real one does,
+   * it is perfectly continuous, and it is confined to a pose from which no drum
+   * can be reached anyway — `onset.js` refuses to strike with a stub. */
+  const reach = unit * smooth(conf, DEGEN_LO, DEGEN_HI);
   return {
     mode: STICK, span, unit, reach, conf,
     axis: { x: ax, y: ay },
@@ -280,11 +399,11 @@ export function fingerFrom(lm, span) {
  * Where the striking point is, given one hand's landmarks.
  * @returns { mode, tip, grip, butt, axis, span, unit, reach, conf }
  */
-export function poseOf(lm, { mode = FINGER, length = LENGTH, world = null } = {}) {
+export function poseOf(lm, { mode = FINGER, length = LENGTH, world = null, sign = 0 } = {}) {
   if (!lm) return null;
   const span = spanOf(lm, world);
   return mode === STICK
-    ? stickFrom({ grip: gripOf(lm), axis: axisOf(lm, span), span }, length)
+    ? stickFrom({ grip: gripOf(lm), axis: aimOf(lm, span, sign), span }, length)
     : fingerFrom(lm, span);
 }
 
@@ -301,21 +420,28 @@ export const stickOf = (lm, length = LENGTH, world = null) =>
  * A pose smoothed over time.
  *
  * Different quantities, different timescales, because they are different kinds
- * of thing. **Angle** is a pose and gets a couple of frames of lag — but *more*
- * when the axis is foreshortened, because a direction turning into noise is
- * worth lagging and the stick is short by then anyway, so the lag barely shows.
- * **Span** is a measurement of a hand that is not changing size, so it is
- * smoothed hard: length flicker is the single thing that makes a drawn stick
- * look fake. **Position** is by default not smoothed at all — it is what
- * contact is measured from, and lag there is latency you can hear.
+ * of thing. **Angle** is a pose and gets a couple of frames of lag — a constant
+ * couple, now that `aimOf` returns a direction that is well conditioned in
+ * every pose and so has no weak case to lag harder. **Span** is a measurement
+ * of a hand that is not changing size, so it is smoothed hard: length flicker
+ * is the single thing that makes a drawn stick look fake. **Position** is by
+ * default not smoothed at all — it is what contact is measured from, and lag
+ * there is latency you can hear.
+ *
+ * The filter also owns the **sign latch**: which end of the knuckle line the
+ * tip is on. It is set from the forward axis whenever the forward axis is worth
+ * believing, held unchanged when it is not, and revised only after `SIGN_HOLD`
+ * consecutive frames of strong disagreement — so a single noisy frame at the
+ * ambiguous angle cannot turn a stick round mid-stroke, which is what the
+ * design before last did.
  *
  * Fingertip mode smooths nothing but the span. The tip is a landmark the
  * tracker reports directly; there is no derived direction to steady, and any
  * filtering would be pure latency on the one number that matters.
  */
 export class PoseFilter {
-  constructor(tau = 0.045, posTau = 0) { this.tau = tau; this.posTau = posTau; this.mode = FINGER; this.reset(); }
-  reset() { this.ax = null; this.ay = 1; this.span = 0; this.px = 0; this.py = 0; }
+  constructor(tau = 0.030, posTau = 0) { this.tau = tau; this.posTau = posTau; this.mode = FINGER; this.reset(); }
+  reset() { this.ax = null; this.ay = 1; this.span = 0; this.px = 0; this.py = 0; this.sign = 0; this.dissent = 0; }
   setMode(mode) { if (mode !== this.mode) { this.mode = mode; this.reset(); } }
 
   update(lm, length = LENGTH, dt = 1 / 60, world = null) {
@@ -330,12 +456,20 @@ export class PoseFilter {
       return fingerFrom(lm, this.span);
     }
 
-    const a = axisOf(lm, this.span), g = gripOf(lm);
+    const a = aimOf(lm, this.span, this.sign), g = gripOf(lm);
+    /* The latch. Adopt on the first believable look, hold through everything
+     * weaker, and only turn the stick round after several consecutive strong
+     * frames saying the hand really has gone over. A hand cannot reverse
+     * without passing through the pose where it has no stick to reverse. */
+    if (a.conf > SIGN_TRUST) {
+      if (!this.sign) this.sign = a.vote;
+      else if (a.vote !== this.sign) { if (++this.dissent >= SIGN_HOLD) { this.sign = a.vote; this.dissent = 0; } }
+      else this.dissent = 0;
+    } else this.dissent = 0;
+
     if (this.ax === null) { this.ax = a.x; this.ay = a.y; this.px = g.x; this.py = g.y; }
     else {
-      // Lag the angle harder the less the axis can be believed.
-      const tau = this.tau * (1 + 4 * (1 - smooth(a.conf, 0.18, 0.85)));
-      const k = 1 - Math.exp(-step / tau);
+      const k = 1 - Math.exp(-step / this.tau);
       this.ax += (a.x - this.ax) * k;
       this.ay += (a.y - this.ay) * k;
       if (this.posTau > 0) {

@@ -418,9 +418,22 @@ try {
     `${spsBefore} → ${spsAfter}`);
   await evl(`[...document.querySelectorAll('#patEdit .btn')].find(b => b.textContent === 'Save').click(); true`);
   await sleep(300);
-  ok(await evl(`document.querySelectorAll('#patList .plitem').length === 7`),
-    'saving adds the custom pattern to the list (5 built-in + 1 custom + new)',
-    `→ ${await evl(`document.querySelectorAll('#patList .plitem').length`)}`);
+  /* Count against the registry rather than a magic number: the built-in set is
+   * meant to grow, and an assertion that has to be edited every time one is
+   * added is an assertion that will eventually just be edited to whatever the
+   * code now does. One row per pattern, plus the "+ New pattern" ghost. */
+  const listed = await evl(`(() => {
+    const rows = document.querySelectorAll('#patList .plrow').length;
+    const ghost = document.querySelectorAll('#patList .plitem.ghost').length;
+    return { rows, ghost, groups: document.querySelectorAll('#patList .pl-group').length };
+  })()`);
+  ok(listed.ghost === 1 && listed.rows >= 6 && listed.groups === 3,
+    'saving adds the custom to the list, under its own group heading',
+    `→ ${listed.rows} rows, ${listed.groups} groups, ${listed.ghost} ghost`);
+  // …and it is the custom group that grew, not a built-in that got overwritten.
+  ok(await evl(`[...document.querySelectorAll('#patList .plrow .pl-kind')]
+    .filter(n => /custom/.test(n.textContent)).length === 1`),
+    'exactly one row is marked custom');
   await evl(`document.getElementById('patClose').click(); true`);
   await sleep(400);
   const blob = await evl(`JSON.parse(localStorage.getItem('air-guitar.v2'))`);

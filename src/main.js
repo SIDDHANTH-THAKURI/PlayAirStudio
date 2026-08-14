@@ -1,6 +1,7 @@
 /** main.js — wiring: camera → tracking → gestures → strings/patterns → audio + UI. */
 import { Tracker, Camera, IS_MOBILE } from './tracking.js';
-import { GestureEngine, SIGNS, STRUM_SIGNS, STRING_LABELS } from './gestures.js';
+import { GestureEngine, SIGNS, STRUM_SIGNS, STRING_LABELS, GRID_Y0, GRID_Y1 } from './gestures.js';
+import { FaceVeil, faceHidden, setFaceHidden, onFaceHiddenChange } from './privacy.js';
 import { GuitarEngine } from './audio.js';
 import { Overlay, SCOL } from './render.js';
 import { STYLES, NOTE_NAMES, specToChord, diagramSVG,
@@ -19,6 +20,7 @@ const el = {
   slotlist: $('slotlist'), lhState: $('lhState'),
   bStroke: $('badgeStroke'), bMute: $('badgeMute'), bExpr: $('badgeExpr'),
   pCam: $('pillCam'), pHands: $('pillHands'), pPerf: $('pillPerf'),
+  pFace: $('pillFace'), pFaceLabel: $('pillFaceLabel'),
 };
 
 /* Persisted settings + the volatile bits that never outlive the tab. */
@@ -29,9 +31,12 @@ const persist = () => store.save(S);
 
 /* The grid lives in the left half; `gridY` bounds keep it clear of the mode
  * captions at the top and the coach card at the bottom. */
+/* gridY0/gridY1 come from gestures.js — see the note there for why the wall
+   stops well short of the bottom edge. Both the hit test and `render.js` read
+   the same two numbers, so the painted wall is exactly the detectable one. */
 const layout = () => (S.lefty
-  ? { neckX0: 0.52, neckX1: 0.97, strumX0: 0.03, strumX1: 0.48, gridY0: 0.10, gridY1: 0.90, lefty: true }
-  : { neckX0: 0.03, neckX1: 0.48, strumX0: 0.52, strumX1: 0.97, gridY0: 0.10, gridY1: 0.90, lefty: false });
+  ? { neckX0: 0.52, neckX1: 0.97, strumX0: 0.03, strumX1: 0.48, gridY0: GRID_Y0, gridY1: GRID_Y1, lefty: true }
+  : { neckX0: 0.03, neckX1: 0.48, strumX0: 0.52, strumX1: 0.97, gridY0: GRID_Y0, gridY1: GRID_Y1, lefty: false });
 
 const cfg = () => ({
   chordMode: S.chordMode, playMode: S.playMode,
@@ -40,6 +45,20 @@ const cfg = () => ({
 
 const tracker = new Tracker(), camera = new Camera(el.video),
       gestures = new GestureEngine(), guitar = new GuitarEngine(), overlay = new Overlay(el.canvas);
+
+/* Face blur. Constructing it is free — no model, no DOM, no inference until
+   `set(true)` — so it can be wired unconditionally and left off. */
+const faceVeil = new FaceVeil(el.video, el.stage);
+function paintFacePriv() {
+  const on = faceHidden();
+  el.pFace?.setAttribute('aria-pressed', String(on));
+  if (el.pFaceLabel) el.pFaceLabel.textContent = on ? 'face hidden' : 'face visible';
+  if (el.pFace) el.pFace.title = on ? 'Show my face again' : 'Blur my face in the camera view';
+}
+el.pFace?.addEventListener('click', () => setFaceHidden(!faceHidden()));
+onFaceHiddenChange((on) => { faceVeil.set(on); paintFacePriv(); });
+faceVeil.set(faceHidden());
+paintFacePriv();
 
 /** The chord bank the fretting hand is currently aiming at. */
 let bank = [];
@@ -521,6 +540,10 @@ function frame() {
     wheelLabels: { fret: ['Chord grid', 'Sign chords'], pluck: ['Fingerstyle', 'Strumming'] },
     patternLabel, stringLabel: pluck.target >= 0 ? STRING_LABELS[pluck.target] : '',
   });
+
+  // The face blur yields whenever hand inference is already over its slice —
+  // the hands are the instrument, the face is decoration.
+  faceVeil.tick(nowMs, tracker.emaMs > 60);
 
   /* ---- HUD ---- */
   if (S.running) {

@@ -42,6 +42,11 @@
  * the thing you are actually playing.
  */
 import { IntroAudio } from './audio-intro.js';
+/* Only the two-line settings half of privacy.js reaches this page. The face
+   model and the MediaPipe bundle are behind a dynamic import inside FaceVeil,
+   which the shelf never constructs — so choosing the setting here costs a
+   localStorage write and nothing else. */
+import { faceHidden, setFaceHidden, onFaceHiddenChange } from './privacy.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -865,6 +870,24 @@ goBtn.addEventListener('click', () => {
   // link, by back button or by keyboard all look the same.
   location.hash = '#apps';
 });
+
+/* ---- hide-my-face ---- */
+const faceBtn = $('faceToggle');
+const faceSub = $('faceToggleSub');
+const paintFace = () => {
+  const on = faceHidden();
+  faceBtn.setAttribute('aria-pressed', String(on));
+  faceSub.textContent = on
+    ? 'Your face is blurred wherever you play'
+    : 'Your face is visible in the camera view';
+};
+paintFace();
+faceBtn.addEventListener('click', () => {
+  const on = setFaceHidden(!faceHidden());
+  audio.tap(on ? 3 : 1);
+  paintFace();
+});
+onFaceHiddenChange(paintFace);
 
 /* ---- the cards ---- */
 for (const [i, card] of [...document.querySelectorAll('.card')].entries()) {

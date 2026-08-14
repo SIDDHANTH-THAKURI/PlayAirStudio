@@ -131,7 +131,107 @@ export const PATTERNS = {
       { k: 'u', v: 0.62 }, { k: 'x', v: 0.45 },
     ],
   },
+
+  /* ---------------------------------------------------------------- *
+   *  The rest are `group: 'more'` — built in, but bound to no sign.
+   *
+   *  That distinction is the point of them. The five above are the
+   *  factory defaults for the five hand signs, so adding a sixth with a
+   *  `def` somewhere would silently take a gesture away from whatever
+   *  already had it. These sit in the list instead: audition them, then
+   *  bind whichever you want to whichever sign, in the strum maker.
+   *
+   *  Every one is 8 or 16 steps, and that is a hard constraint rather
+   *  than a habit — opening a built-in hands you an editable copy, and
+   *  `saveCustom` rejects any bar that is neither length, so a 6- or
+   *  12-step built-in would be the one pattern you could never copy.
+   * ---------------------------------------------------------------- */
+
+  sway: {                        // D · D U U · D U  — "down down up up down up"
+    id: 'sway', label: 'Sway', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'd', v: 0.9 },  null,
+      { k: 'd', v: 0.7 },  { k: 'u', v: 0.6 },
+      { k: 'u', v: 0.55 }, null,
+      { k: 'd', v: 0.82 }, { k: 'u', v: 0.62 },
+    ],
+  },
+  bolly: {                       // D D U U D D U U D U — eighths that break
+    id: 'bolly', label: 'Bollywood', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [                     // into sixteenths across the last beat
+      { k: 'd', v: 0.92 }, null, { k: 'd', v: 0.66 }, null,
+      { k: 'u', v: 0.6 },  null, { k: 'u', v: 0.56 }, null,
+      { k: 'd', v: 0.88 }, null, { k: 'd', v: 0.66 }, null,
+      { k: 'u', v: 0.6 }, { k: 'u', v: 0.5 }, { k: 'd', v: 0.74 }, { k: 'u', v: 0.6 },
+    ],
+  },
+  kaharwa: {                     // eight-beat feel: bass on 1, chunk on the 2
+    id: 'kaharwa', label: 'Kaharwa', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'b', v: 0.86 }, null, { k: 'd', v: 0.7 },  { k: 'u', v: 0.55 },
+      { k: 'x', v: 0.55 }, null, { k: 'd', v: 0.68 }, { k: 'u', v: 0.55 },
+      { k: 'b', v: 0.8 },  null, { k: 'd', v: 0.7 },  { k: 'u', v: 0.55 },
+      { k: 'x', v: 0.55 }, { k: 'u', v: 0.5 }, { k: 'd', v: 0.7 }, { k: 'u', v: 0.58 },
+    ],
+  },
+  sixteens: {                    // unbroken alternation; the accents carry it
+    id: 'sixteens', label: 'Sixteens', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'd', v: 0.9 },  { k: 'u', v: 0.5 }, { k: 'd', v: 0.6 }, { k: 'u', v: 0.5 },
+      { k: 'd', v: 0.78 }, { k: 'u', v: 0.5 }, { k: 'd', v: 0.6 }, { k: 'u', v: 0.5 },
+      { k: 'd', v: 0.86 }, { k: 'u', v: 0.5 }, { k: 'd', v: 0.6 }, { k: 'u', v: 0.5 },
+      { k: 'd', v: 0.78 }, { k: 'u', v: 0.5 }, { k: 'd', v: 0.6 }, { k: 'u', v: 0.52 },
+    ],
+  },
+  offbeat: {                     // chunk on the beat, brush on the & — skank
+    id: 'offbeat', label: 'Offbeat', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'x', v: 0.5 },  { k: 'u', v: 0.75 },
+      { k: 'x', v: 0.45 }, { k: 'u', v: 0.7 },
+      { k: 'x', v: 0.5 },  { k: 'u', v: 0.75 },
+      { k: 'x', v: 0.45 }, { k: 'u', v: 0.72 },
+    ],
+  },
+  anthem: {                      // wide and slow, so a voice has somewhere to go
+    id: 'anthem', label: 'Anthem', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'd', v: 0.95 }, null,
+      null,                { k: 'd', v: 0.7 },
+      { k: 'd', v: 0.88 }, null,
+      { k: 'd', v: 0.72 }, { k: 'u', v: 0.6 },
+    ],
+  },
+  rumba: {                       // the Latin cell: long, long, short-short-long
+    id: 'rumba', label: 'Rumba', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'd', v: 0.92 }, null, null, { k: 'u', v: 0.5 },
+      { k: 'd', v: 0.75 }, null, { k: 'u', v: 0.58 }, null,
+      { k: 'd', v: 0.7 },  { k: 'u', v: 0.5 }, null, { k: 'u', v: 0.55 },
+      { k: 'd', v: 0.85 }, null, { k: 'u', v: 0.6 }, null,
+    ],
+  },
+  cascade: {                     // sixteenth-note roll; alternating bass under it
+    id: 'cascade', label: 'Cascade', glyph: '🎚️', builtin: true, group: 'more',
+    steps: [
+      { k: 'b', v: 0.78 },       { k: 's', s: 2, v: 0.5 },
+      { k: 's', s: 3, v: 0.52 }, { k: 's', s: 4, v: 0.55 },
+      { k: 's', s: 5, v: 0.6 },  { k: 's', s: 4, v: 0.5 },
+      { k: 's', s: 3, v: 0.48 }, { k: 's', s: 4, v: 0.5 },
+      { k: 'ab', v: 0.74 },      { k: 's', s: 2, v: 0.5 },
+      { k: 's', s: 3, v: 0.52 }, { k: 's', s: 4, v: 0.55 },
+      { k: 's', s: 5, v: 0.62 }, { k: 's', s: 4, v: 0.5 },
+      { k: 's', s: 3, v: 0.48 }, { k: 's', s: 5, v: 0.55 },
+    ],
+  },
 };
+
+/** List sections, in display order. A pattern's group is its own, or 'custom'. */
+export const PATTERN_GROUPS = [
+  { id: 'core',   label: 'On the hand signs' },
+  { id: 'more',   label: 'More patterns' },
+  { id: 'custom', label: 'Yours' },
+];
+export const groupOf = (p) => (p?.builtin ? (p.group || 'core') : 'custom');
 
 /* ================================================================== *
  *  Registry — built-ins plus whatever the player has authored.

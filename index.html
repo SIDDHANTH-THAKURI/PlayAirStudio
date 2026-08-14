@@ -58,8 +58,8 @@
     <p class="th-kicker">Hand-tracked instruments · in the browser</p>
 
     <h1 class="wordmark">
-      <span class="w"><span class="l" style="--i:0">A</span><span class="l" style="--i:1">i</span><span class="l" style="--i:2">r</span></span>
-      <span class="w it"><span class="l" style="--i:3">S</span><span class="l" style="--i:4">t</span><span class="l" style="--i:5">u</span><span class="l" style="--i:6">d</span><span class="l" style="--i:7">i</span><span class="l" style="--i:8">o</span></span>
+      <span class="w" style="--i:0">Air</span>
+      <span class="w it" style="--i:1">Studio</span>
     </h1>
 
     <p class="th-sub">Nothing to install. Nothing to plug in.<br />Just your hands, and a webcam that is watching them.</p>
@@ -107,9 +107,9 @@
     <p class="eyebrow"><span class="dot"></span>runs entirely in your browser</p>
 
     <h2 class="title">
-      <span class="w"><span class="l" style="--i:0">P</span><span class="l" style="--i:1">l</span><span class="l" style="--i:2">a</span><span class="l" style="--i:3">y</span></span>
-      <span class="w"><span class="l" style="--i:4">t</span><span class="l" style="--i:5">h</span><span class="l" style="--i:6">e</span></span>
-      <span class="w it"><span class="l" style="--i:7">a</span><span class="l" style="--i:8">i</span><span class="l" style="--i:9">r</span><span class="l" style="--i:10">.</span></span>
+      <span class="w" style="--i:0">Play</span>
+      <span class="w" style="--i:1">the</span>
+      <span class="w it" style="--i:2">air.</span>
     </h2>
 
     <p class="lede">A webcam watches your hands, and a guitar, a piano and a drum
@@ -227,6 +227,19 @@
         </div>
       </div>
 
+    </div>
+
+    <!-- Chosen here, read by all three instruments. It belongs on the way in
+         rather than buried in each instrument's settings, because the moment
+         you want it is before the camera turns on, not after. -->
+    <div class="privacy-row">
+      <button class="priv-switch" id="faceToggle" type="button" aria-pressed="false">
+        <span class="priv-track" aria-hidden="true"><span class="priv-knob"></span></span>
+        <span class="priv-text">
+          <span class="priv-title">Hide my face</span>
+          <span class="priv-sub" id="faceToggleSub">Your face is visible in the camera view</span>
+        </span>
+      </button>
     </div>
 
     <p class="shelf-foot">No account, no upload, no recording. Your camera feed
