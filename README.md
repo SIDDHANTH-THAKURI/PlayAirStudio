@@ -13,7 +13,7 @@ voicings, vibrato/bends/dead-notes for expression.
 Entirely client-side. No backend, no uploads, no recording — the video never
 leaves the tab.
 
-## Run it
+## Run it :
 
 Browsers only hand out cameras on `https://` or `localhost`, and ES modules
 need a real origin, so open it through a local server rather than `file://`:
