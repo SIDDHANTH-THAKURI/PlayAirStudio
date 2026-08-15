@@ -19,7 +19,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <a class="brand-back" href="./index.html" aria-label="Back to Air Studio">←</a>
+      <a class="brand-back" href="./index.html#apps" aria-label="Back to the instruments">←</a>
       <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
         <g fill="none" stroke-width="1.6">
           <ellipse cx="20" cy="24" rx="12" ry="5" stroke="#C46A1F"/>
@@ -223,7 +223,46 @@
   </div>
 </div>
 
-<script type="module" src="./src/gate.js"></script>
-<script type="module" src="./src/drums/main.js"></script>
+<!-- ============================================================= *
+     Air Drums is not finished, so this page does not start.
+
+     It is held back here rather than by deleting the page, because the
+     instrument itself is intact underneath — the stick tracking, the kit, the
+     synthesis and its whole test suite all still run. Serving a 404 would
+     throw that away and break every link that already points here; this way
+     the only thing standing between it and playable is this one block.
+
+     `main.js` is never imported, so no camera is requested, no MediaPipe model
+     is fetched and no audio graph is built. To put it back: delete this
+     script, restore the plain module tag below it, and drop `data-soon` from
+     the drums card on the shelf.
+ * ============================================================= -->
+<script type="module">
+  /* `app.hidden = true` is not enough here, and the failure is silent: the
+     `hidden` attribute works through a UA rule (`[hidden] { display: none }`),
+     and `.app` carries an author `display`, which outranks it. The app stayed
+     laid out, and its `position: fixed` camera veil sat over this card. Set
+     display outright. */
+  const app = document.querySelector('.app');
+  if (app) { app.hidden = true; app.style.display = 'none'; }
+  const wrap = document.createElement('div');
+  wrap.className = 'soon-screen';
+  wrap.innerHTML = `
+    <div class="soon-card">
+      <div class="soon-mark" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <p class="soon-kicker">Air Drums</p>
+      <h1>Still in development</h1>
+      <p class="soon-body">The sticks and the kit work, but the feel isn't there
+        yet — and a drum that lands late is worse than no drum at all. It is
+        coming back once it plays properly.</p>
+      <a class="btn" href="./index.html#apps">Back to the instruments</a>
+      <p class="soon-foot">Air Guitar and Air Piano are both ready to play.</p>
+    </div>`;
+  document.body.append(wrap);
+  document.title = 'Air Drums — in development';
+</script>
+<!-- <script type="module" src="./src/drums/main.js"></script> -->
 </body>
 </html>

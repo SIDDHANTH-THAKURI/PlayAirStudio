@@ -98,9 +98,6 @@ try {
 
   console.log('\nboot');
   // The site is gated while it's being worked on; open it the way a visitor
-  // with the key would. (It is not security — see src/gate.js.)
-  await waitFor(`!!window.airGate`, 20000, 'access gate');
-  ok(await evl(`airGate.unlock('siddhanth') === true`), 'the access gate opens with the key');
 
   await waitFor(`!!window.airPiano`, 25000, 'piano module');
   ok(true, 'page and modules load');
@@ -129,22 +126,30 @@ try {
 
   /* ---- the first-run walkthrough ---- */
   console.log('\nwalkthrough');
-  ok(await evl(`!document.getElementById('tour').hidden`), 'a first visit is walked through it');
+  /* The walkthrough is now the illustrated deck the guitar uses, driven from
+   * piano-specific slides, so it is the same DOM: `.tut` rather than `#tour`. */
+  ok(await evl(`!document.querySelector('.tut').hidden`), 'a first visit is walked through it');
   ok(await evl(`document.getElementById('calBar').hidden`),
     'and calibration waits its turn rather than opening underneath');
-  const step = () => evl(`document.getElementById('tourCard').querySelector('.tour-of').textContent`);
-  ok(/^1 of \d/.test(await step()), 'it starts at the first card', `→ "${await step()}"`);
+  const step = () => evl(`document.querySelector('.tut .tut-step').textContent`);
+  ok(/^Step 1 of \d/.test(await step()), 'it starts at the first card', `→ "${await step()}"`);
+  // Every slide must actually draw something — an illustrated walkthrough whose
+  // canvas is blank is worse than a written one, and fails silently.
+  const lit = await evl(`(() => { const c = document.querySelector('.tut-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; })()`);
+  ok(lit > 2000, 'and the first slide actually draws its scene', `${lit} lit pixels`);
   // Walk it the way a first-time player would: forwards, to the end.
   const cards = Number((await step()).split(' of ')[1]);
-  ok(cards >= 4, 'and there is a walkthrough to walk', `(${cards} cards)`);
+  ok(cards >= 8, 'the deck goes past the basics', `(${cards} slides)`);
   for (let i = 1; i < cards; i++) {
-    await evl(`document.getElementById('tourCard').querySelector('[data-act="next"]').click(); true`);
+    await evl(`document.querySelector('.tut [data-act="next"]').click(); true`);
     await sleep(90);
   }
-  ok(new RegExp(`^${cards} of ${cards}`).test(await step()), 'Next reaches the last card');
-  await evl(`document.getElementById('tourCard').querySelector('[data-act="next"]').click(); true`);
+  ok(new RegExp(`^Step ${cards} of ${cards}`).test(await step()), 'Next reaches the last card');
+  await evl(`document.querySelector('.tut [data-act="next"]').click(); true`);
   await sleep(400);      // the settings write is debounced
-  ok(await evl(`document.getElementById('tour').hidden`), 'and finishing closes it');
+  ok(await evl(`document.querySelector('.tut').hidden`), 'and finishing closes it');
   ok(await evl(`JSON.parse(localStorage.getItem('air-piano.v1')||'{}').toured === true`),
     'a visitor who has seen it is remembered');
 
@@ -203,10 +208,10 @@ try {
   // not disturb a surface that is already marked out.
   await evl(`document.getElementById('tourBtn').click(); true`);
   await sleep(150);
-  ok(await evl(`!document.getElementById('tour').hidden`), 'the walkthrough can be replayed on demand');
-  await evl(`document.getElementById('tourCard').querySelector('[data-act="skip"]').click(); true`);
+  ok(await evl(`!document.querySelector('.tut').hidden`), 'the walkthrough can be replayed on demand');
+  await evl(`document.querySelector('.tut [data-act="skip"]').click(); true`);
   await sleep(200);
-  ok(await evl(`document.getElementById('tour').hidden && document.getElementById('calBar').hidden`),
+  ok(await evl(`document.querySelector('.tut').hidden && document.getElementById('calBar').hidden`),
     'and skipping a replay leaves a calibrated surface alone');
 
   // Perspective is real: the far edge occupies fewer pixels than the near one.

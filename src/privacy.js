@@ -41,11 +41,33 @@ const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
 const BUNDLE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 const MODEL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
 
-const PERIOD = 200;    // ms between face looks — 5 Hz is plenty for a head
+/* Cadence and smoothing, and why these numbers rather than gentler ones.
+ *
+ * The first build ran at 5 Hz behind a 0.35 EMA and it visibly lagged: a head
+ * that moves takes its blur with it about a third of a second later, which is
+ * exactly the third of a second you did not want to be on camera. Both halves
+ * were at fault and both are fixed here.
+ *
+ * 5 Hz was chosen on the reasoning that a head does not move like a hand. True
+ * of a head at rest, false of a head that is turning to look at something, and
+ * it is the second case that matters. 15 Hz costs more but is still an order of
+ * magnitude below the hand tracker's demands, and it yields entirely whenever
+ * the hands are behind (see `_due`), so the instrument never pays for it.
+ *
+ * The EMA then made it worse, because an EMA is a *lag* — 0.35 means the box is
+ * always somewhere between where the face was and where it is. Rather than
+ * smoothing harder, the box is now extrapolated forward along its own measured
+ * velocity, so between detections it keeps moving instead of waiting. Residual
+ * jitter is handled by widening the box while it travels, not by damping it:
+ * over-covering during motion is the failure you want.
+ */
+const PERIOD = 66;     // ms between face looks — ~15 Hz
 const HOLD   = 1.2;    // s a lost face keeps its last box before we cover all
-const SMOOTH = 0.35;   // EMA on the box; a jittering blur is worse than none
+const SMOOTH = 0.55;   // EMA on the box; higher = follows harder
+const LEAD   = 0.10;   // s of velocity extrapolated ahead, so it leads the head
 const PAD    = 0.34;   // grow the box by this much — detectors crop tight to
                        // the face, and a jaw or an ear left outside is a miss
+const SPREAD = 0.9;    // extra padding per unit of speed, while it is moving
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
@@ -139,6 +161,8 @@ export class FaceVeil {
     this.on = false;
     this.state = 'off';
     this.box = null;
+    this.vx = this.vy = this.cx = this.cy = undefined;
+    this.lastMeas = 0;
     this.el?.remove();
     this.el = null;
     // The detector is kept: re-enabling should be instant, and it costs
@@ -158,10 +182,10 @@ export class FaceVeil {
     // Time out a lost face into a full cover rather than leaving a stale box
     // hanging over a frame the player has since moved out of.
     if (this.box && (now / 1000) - this.seenAt > HOLD) {
-      this.box = null;
+      this.box = null; this.vx = this.vy = undefined;
       if (this.state === 'tracking') this.state = 'searching';
     }
-    this._paint(this.box);
+    this._paint(this._lead());
   }
 
   /** 5 Hz, backed off by measured cost, and never while the hands are late. */
@@ -197,9 +221,26 @@ export class FaceVeil {
     const x = 1 - (b.originX / v.videoWidth) - w;
     const y = b.originY / v.videoHeight;
 
+    const cx = x + w / 2, cy = y + h / 2;
+    const t = now / 1000;
+
+    // Velocity of the face's centre, in frame-widths per second. Measured
+    // between detections rather than per frame, so it is a real speed.
+    const dt = this.lastMeas ? Math.max(t - this.lastMeas, 1 / 60) : 0;
+    if (dt && dt < 0.5 && this.cx !== undefined) {
+      const vx = (cx - this.cx) / dt, vy = (cy - this.cy) / dt;
+      this.vx = this.vx === undefined ? vx : this.vx + (vx - this.vx) * 0.5;
+      this.vy = this.vy === undefined ? vy : this.vy + (vy - this.vy) * 0.5;
+    }
+    this.cx = cx; this.cy = cy; this.lastMeas = t;
+
+    // Widen while moving. Covering too much of a moving head is invisible;
+    // covering too little of one is the entire failure this feature has.
+    const speed = Math.hypot(this.vx || 0, this.vy || 0);
+    const pad = PAD + Math.min(SPREAD, speed * SPREAD);
     const grown = {
-      x: x - w * PAD / 2, y: y - h * PAD / 2,
-      w: w * (1 + PAD), h: h * (1 + PAD),
+      x: cx - w * (1 + pad) / 2, y: cy - h * (1 + pad) / 2,
+      w: w * (1 + pad), h: h * (1 + pad),
     };
     this.box = this.box
       ? { x: this.box.x + (grown.x - this.box.x) * SMOOTH,
@@ -207,8 +248,19 @@ export class FaceVeil {
           w: this.box.w + (grown.w - this.box.w) * SMOOTH,
           h: this.box.h + (grown.h - this.box.h) * SMOOTH }
       : grown;
-    this.seenAt = now / 1000;
+    this.seenAt = t;
     this.state = 'tracking';
+  }
+
+  /** The box carried forward along its own velocity, for the frames between
+   *  detections. Without this the veil simply waits, which is the lag. */
+  _lead() {
+    const b = this.box;
+    if (!b) return null;
+    const age = Math.min(performance.now() / 1000 - this.lastMeas, LEAD * 2);
+    if (!(age > 0) || this.vx === undefined) return b;
+    const k = Math.min(age + LEAD, 0.35);
+    return { x: b.x + this.vx * k, y: b.y + this.vy * k, w: b.w, h: b.h };
   }
 
   /** No box → cover the frame. A box → an ellipse over it, softly edged. */

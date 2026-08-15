@@ -63,9 +63,10 @@ export const HAND_COL = { left: '#4E7FA8', right: '#C0631A' };
 const isCymbal = (id) => id === 'crash' || id === 'ride' || id === 'hihat';
 
 export class Overlay {
-  constructor(canvas) {
+  constructor(canvas, video = null) {
     this.cv = canvas;
     this.ctx = canvas.getContext('2d');
+    this.video = video;
     this.hits = [];        // recent strikes, for the bloom
     this.bits = [];        // particles
     this.glow = new Map(); // pad id → how lit it is right now, 0…1
@@ -82,11 +83,25 @@ export class Overlay {
   resize() {
     const cap = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
     const r = this.cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, cap);
-    if (r.width === this.w && r.height === this.h && dpr === this.dpr) return;
-    this.w = r.width; this.h = r.height; this.dpr = dpr;
+    const vw = this.video?.videoWidth || 0, vh = this.video?.videoHeight || 0;
+    if (r.width === this.boxW && r.height === this.boxH && dpr === this.dpr
+        && vw === this.vw && vh === this.vh) return;
+    this.boxW = r.width; this.boxH = r.height; this.dpr = dpr;
+    this.vw = vw; this.vh = vh;
     this.cv.width = Math.round(r.width * dpr);
     this.cv.height = Math.round(r.height * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    /* `w`/`h` are the size the video is *painted* at, not the box. The video is
+       object-fit: cover, so any shape mismatch crops it, and multiplying a
+       landmark by the box width assumes that crop is zero. See the long note in
+       src/render.js — this is the intermittent hand-displacement bug. When the
+       shapes agree this collapses to the old arithmetic. */
+    const s = vw > 0 && vh > 0 ? Math.max(r.width / vw, r.height / vh) : 0;
+    this.w = s ? vw * s : r.width;
+    this.h = s ? vh * s : r.height;
+    this.ox = (r.width - this.w) / 2;
+    this.oy = (r.height - this.h) / 2;
+    this.ctx.setTransform(dpr, 0, 0, dpr, this.ox * dpr, this.oy * dpr);
   }
 
   /**

@@ -24,8 +24,9 @@ npm start                     # or: node test/serve.mjs, or: python -m http.serv
 ```
 
 Then open <http://localhost:8000> — that's **Air Studio**, the landing page and
-app shelf. Three instruments are playable: Air Guitar at `/play.html`, Air Piano
-at `/piano.html`, and Air Drums at `/drums.html`.
+app shelf. Two instruments are playable: Air Guitar at `/play.html` and Air
+Piano at `/piano.html`. **Air Drums is held back** while its feel is worked on
+— see below.
 
 First load pulls Tone.js, the MediaPipe WASM runtime and the hand-landmark
 model from CDNs; after that it's cached. Chrome or Edge give the best tracking
@@ -187,23 +188,58 @@ are looking at is not a worse way to pick a chord:
 The chord strip is laid out in four columns so it is a true mini-map of the 4×3
 wall on screen — cell 5 is row 2, column 1 in both places.
 
-One thing that is *not* adjustable: the stage keeps whatever aspect ratio the
-camera reports. The video is `object-fit: cover` and the overlay maps landmarks
-onto the displayed box, so the two only line up while the box and the frame are
-the same shape. Force a different ratio and `cover` starts cropping — the feed
-appears to zoom and every drawn hand slides toward the centre, away from the
-real one.
+The stage keeps whatever aspect ratio the camera reports, and it is worth
+knowing why that used to matter so much. The video is `object-fit: cover`, so
+whenever the box and the frame disagree in shape the browser crops the feed —
+and the overlay, which multiplied every normalised landmark by the *box* width,
+was assuming that crop was always zero. When it wasn't, both hands were drawn
+somewhere the hands were not.
 
-That shape can change *while you play*: a throughput renegotiation picking a
-mode the camera likes better, a phone rotating, a different device being
-selected. The stage is bound to the video's `resize` event rather than measured
-once at boot — but that event is still just an event, not a guarantee, and a
-missed one used to leave the mismatch sitting there indefinitely (reported as
-the feed "zooming" and both hands displaced after a few seconds of play). A
-periodic check in the existing perf tick now self-heals independently of
-whether anything fired: it costs one ratio comparison roughly three times a
-second and needs no event at all, which a smoke test proves directly by
-skewing the box and confirming it recovers with every resize listener removed.
+The shape can change *while you play*: a throughput renegotiation picking a mode
+the camera likes better, a phone rotating, a different device being selected. So
+the stage is bound to the video's `resize` event rather than measured once at
+boot, and a periodic check in the perf tick self-heals anything that event
+misses — it costs one ratio comparison three times a second, and a smoke test
+proves it recovers with every resize listener removed.
+
+**But keeping the two matched is a race, and it was losing intermittently.** The
+CSS starts at a guessed 16/9 before the camera has reported anything, `resize`
+is not guaranteed for every renegotiation, and the self-heal tolerates 2% drift
+and only runs a few times a second. Every one of those windows displaced the
+hands, which is exactly the shape of a bug reported as happening "rarely".
+
+The overlay now reproduces `object-fit: cover` itself — it scales by the larger
+ratio and centres the overflow, the same arithmetic the browser is doing — so
+the mapping is correct *during* a mismatch rather than merely after one has been
+corrected. When the shapes agree it collapses to the old multiplication, so the
+common path is unchanged. The smoke test skews the box, measures synchronously
+before any heal can intervene, and checks both that the mapping matches the
+cover geometry and that it *differs* from the old box-width one; at 0.9 across
+the frame the two are 189 px apart, which is the displacement people were
+seeing. Keeping the stage matched is still worth doing — it stops the feed
+looking zoomed — but nothing depends on it being instantaneous any more.
+
+**What is left after that is time, not geometry.** A pose is detected on one
+camera frame and painted over a later one, so the drawn hand always trails the
+hand in the picture by however long inference took. Measured on a slow machine
+at 8.7 looks a second, a hand crossing the frame in a second is drawn 11.2% of
+a frame behind — which is the residual "my hands are displaced" report once the
+mapping is exact, and no amount of remapping touches it.
+
+So the renderer is handed a velocity and draws each hand where it now is. Three
+things keep that honest. It is a single translation of the whole hand, not
+per-landmark extrapolation, so the shape you read is exactly the shape that was
+measured. Nothing that *decides* anything may use it — notes, chords and strokes
+all still read the measured landmarks, so an extrapolation can never invent an
+event. And it is proportional to speed, so it has already fallen to zero by the
+time a hand has stopped, which is precisely when a strike fires.
+
+It also trusts itself less as the sample ages, because a velocity measured
+between the last two detections says where the hand *was* going. Without that
+falloff a hand moving a frame-width a second that stops abruptly between samples
+is drawn 9% of a frame past where it stopped, and an overshoot reads worse than
+the lag it was curing. With it: lag 11.2% → 6.2% at 8.7 looks/s, 1.7% → 0.1% at
+60, and worst-case overshoot 9% → 5.3%.
 
 ### Keyboard fallback
 
@@ -427,6 +463,12 @@ downstream works in table coordinates — u across, v away from you — and the
 overlay runs the mapping backwards, so the grid is painted *on* the desk in the
 camera's own perspective instead of floating over it.
 
+Those controls live in the right-hand panel, directly under the button that
+opens them, and that is not a layout preference. Beneath the stage they were off
+the bottom of the screen on an ordinary laptop: you pressed **Mark out**, clicked
+four corners, and nothing appeared to happen — so you pressed **Mark out** again
+and started over, which is exactly the loop the button is supposed to end.
+
 The corners are placed **with the cursor** — four clicks. They were originally
 marked by *tapping* them, which is, on paper, the more correct thing to do. A
 homography maps exactly one plane; clicking marks the desk, but every point the
@@ -453,13 +495,21 @@ fingertips), and the cure is one sentence of instruction: click where your
 because it is what would price a future tap-assisted refinement.
 
 **The walkthrough.** Two things here are not guessable by poking at it: that a
-note fires when the fingertip is *stopped*, so you strike rather than press,
-and that you must mark out where the keyboard is before anything sounds. Both
-are one sentence each, so the first run spends five cards saying them —
-spotlighting the real controls rather than describing them, since every step
-is something you can try while it is on screen. It hands over to calibration
-when it ends, is remembered so it greets nobody twice, and **Show me around**
-replays it.
+note fires when the fingertip is *stopped*, so you strike rather than press, and
+that you must mark out where the keyboard is before anything sounds. Both are
+*motions*, which is why this is now the same illustrated deck the guitar uses
+(`../tutorial.js` is the shell, `piano/tutorial.js` the slides) rather than the
+five spotlights over real controls it used to be. A spotlight is the right shape
+for "where is the button" and the wrong one for "what is the gesture", and the
+gesture is the entire difficulty.
+
+Nine slides, each animating a drawn hand against a miniature of the real
+surface: marking the four corners, strike-versus-press (with the speed trace
+that explains why one sounds and the other does not), one finger versus all,
+the scale-locked columns, the register split, and what to do when it feels late.
+Nothing in it is a screenshot, so it cannot drift out of date silently. It hands
+over to calibration when it ends, is remembered so it greets nobody twice, and
+**Show me around** replays it.
 
 **Onset detection** is the part that decides whether this is an instrument or a
 toy, and it went through three designs — see the header of `src/piano/onset.js`
@@ -516,7 +566,20 @@ pianist already has.
 
 **Sound** is modal synthesis (`src/piano/piano-worklet.js`): each note is an
 explicit sum of decaying partials, placed where string stiffness actually puts
-them. That inharmonicity is not a defect to correct — it is most of why a piano
+them.
+
+One number in there is a playability decision rather than a modelling one. A
+pedalled grand's bottom notes ring for tens of seconds, and the first build
+modelled that faithfully — but a real piano rings that long *because you can
+stop it*, and tapping a desk gives no key release at all. In the default damper
+mode nothing ever ends a note early, so every strike runs its full course: a
+left-hand note measured audible for 22.9 s, and since the register split puts
+that hand two octaves down, an ordinary bass line stacked a dozen twenty-second
+voices into a single loud mush. The decay coefficient is now 5.5 rather than 13
+and the aftersound is capped in absolute time as well as relative, which brings
+that note to 7.1 s. It is scaled uniformly rather than compressed, because the
+ratio between bass and treble is a real property of strings and the tests check
+it — the whole curve moves and its shape does not. That inharmonicity is not a defect to correct — it is most of why a piano
 sounds like a piano — and it buys per-partial decay and velocity-as-brightness,
 neither of which a delay-line model gives up easily. On top of that:
 
@@ -558,7 +621,20 @@ project: if the header reads `cpu`, inference is typically five to ten times
 slower than it needs to be, and no amount of tuning compensates. That is worth
 checking before concluding the instrument feels sluggish.
 
-## Air Drums (prototype)
+## Air Drums (held back)
+
+**This one does not currently open.** The card on the shelf is marked and does
+not navigate, and `drums.html` shows an in-development notice instead of
+starting: `main.js` is never imported, so no camera is requested, no model is
+fetched and no audio graph is built.
+
+Nothing has been deleted. The stick geometry, the kit, the synthesis and the
+whole test suite below still run and still pass — the instrument is one script
+tag and one `data-soon` attribute away from being back. It is held because the
+*feel* is not there yet, and a drum that lands late is worse than no drum.
+
+The rest of this section describes it as built, and stays true.
+
 
 `drums.html`. **Point one index finger in each hand** — or switch to a pair of
 drumsticks — and bring the tip down through a drum. It sounds right as the tip
@@ -961,6 +1037,30 @@ does), and the **middle of the ride is the bell**, the outside the bow.
 > `sin(w)`, which makes each mode's `gain` mean its actual peak amplitude
 > whatever its frequency or decay.
 
+## The panel scrolls, not the page
+
+Every control on the right is something you reach for *while* looking at the
+stage — so scrolling the window to get at one takes the video off screen, and
+you have to scroll back up to see what you just changed. The panel is sticky
+with its own `max-height` and overflow, so only it moves and the camera stays
+in view the whole time. Scoped to the two-column layout: below the stacking
+breakpoint the panel sits under the video, where a fixed height would be
+nonsense.
+
+Back from an instrument returns to `index.html#apps` — the shelf you came from,
+not the landing page you last saw before it. And it skips the threshold, because
+a door you have already walked through should not be standing in front of you
+again: pressing Back loads the landing fresh, and without this you arrive at the
+ENTER overlay with the shelf blurred out behind it, asked to enter a studio you
+are already in.
+
+The flag is `sessionStorage` rather than `localStorage` on purpose — within this
+tab you have entered, so skip it; open the site tomorrow and you get the proper
+arrival. It only ever suppresses the overlay, never the music, because the music
+is not ours to start: a page reached by navigation has no user activation, so an
+AudioContext built there would sit suspended forever. The score waits for
+whatever you touch first instead.
+
 ## Playing without your face on screen
 
 **Hide my face** on the shelf blurs your face in the camera view, in all three
@@ -985,10 +1085,23 @@ protecting is worse than one that over-protects, because you would only find out
 afterwards, having already been on camera.
 
 What it costs when it *is* on is a second inference, and three things hold that
-down: it runs at 5 Hz rather than per frame (a head does not move like a hand),
-it backs off on its own measured cost the way `tracking.js` does, and it yields
-entirely whenever hand inference is over budget — the hands are the instrument
-and the face is decoration.
+down: it runs at ~15 Hz rather than per frame, it backs off on its own measured
+cost the way `tracking.js` does, and it yields entirely whenever hand inference
+is over budget — the hands are the instrument and the face is decoration.
+
+It started at 5 Hz behind a 0.35 EMA, on the reasoning that a head does not move
+like a hand. That is true of a head at rest and false of one turning to look at
+something, and it is the second case that matters: the blur arrived about a
+third of a second after the face, which is precisely the third of a second you
+did not want to be on camera. The EMA made it worse rather than better, because
+an EMA *is* a lag — it puts the box somewhere between where the face was and
+where it is. So the rate went up, the smoothing came down, and the box is now
+extrapolated forward along its own measured velocity so it keeps moving between
+detections instead of waiting. Residual jitter is absorbed by widening the box
+while it travels, not by damping it: over-covering a moving head is invisible,
+under-covering one is the entire failure this feature exists to prevent.
+Simulated against a head panning across frame, worst-case error went from 20.1%
+of the frame width to 3.1%, and mean error from 7.2% to 0.6%.
 
 It cannot disturb tracking even in principle. Hand tracking reads the raw
 `<video>` through `detectForVideo`, and the veil is a sibling DOM node with a
@@ -997,22 +1110,6 @@ sees. The veil sits at `z-index: 2` and the overlay canvas at `3`, so the blur
 covers the video and never the drawn hands or the chord wall — which also means
 the stacking had to become explicit, because relying on DOM order stopped
 working the moment anything positioned got a z-index.
-
-## Access gate (temporary)
-
-The whole site currently sits behind `src/gate.js`, which asks for a key before
-showing anything.
-
-**It is not security and must not be treated as such.** The site is static:
-every file is served to anyone who asks, and the check runs on their machine.
-The key is in the file, the overlay is a DOM node anyone can delete, and the
-pages work perfectly well if the script never runs. It keeps a casual visitor
-from wandering in mid-build. It stops nothing else. Real protection has to
-happen before the bytes leave the server — Vercel's own deployment protection,
-or an auth layer in front of the origin.
-
-Removing it is one file and three `<script>` tags, which is the shape something
-temporary should have.
 
 ## Files
 
@@ -1029,7 +1126,7 @@ src/piano/onset.js      tap detection — the strike-signature state machine
 src/piano/scales.js     scale-locked note layout across the surface
 src/piano/piano-worklet.js  modal struck-string synthesis
 src/piano/audio.js      Tone chain for the piano
-src/piano/tour.js       the first-run walkthrough, and where it points
+src/piano/tutorial.js   the illustrated walkthrough's piano slides
 src/piano/render.js     overlay drawn onto the calibrated desk
 src/piano/main.js       piano wiring, calibration UI, settings
 drums.html / drums.css  Air Drums: markup and its few theme additions
@@ -1040,7 +1137,6 @@ src/drums/drum-worklet.js  swept sines, inharmonic modes, swept-filter noise
 src/drums/audio.js      Tone chain for the drums
 src/drums/render.js     the kit, the sticks, and the feedback on a hit
 src/drums/main.js       drums wiring and settings
-src/gate.js             temporary access screen (not security — see above)
 styles.css              light, warm theme
 src/main.js             wiring, UI state, error/permission states, keyboard fallback
 src/store.js            localStorage persistence for banks, bindings and custom patterns

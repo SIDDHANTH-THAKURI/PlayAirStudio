@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#04050A" />
 <title>Air Studio — instruments you play with your hands</title>
-<meta name="description" content="Instruments you play with your hands and a webcam. Guitar, piano and drums, all playable now. Everything runs in your browser — no uploads, no recording." />
+<meta name="description" content="Instruments you play with your hands and a webcam. Guitar and piano are playable now, drums are in development. Everything runs in your browser — no uploads, no recording." />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='34' fill='none' stroke='%238B6BFF' stroke-width='7'/><circle cx='50' cy='50' r='12' fill='%233BE3EC'/></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -100,7 +100,7 @@
     <a class="brand" href="#" aria-label="Air Studio">
       <span class="brand-dot"></span><span class="brand-name">Air Studio</span>
     </a>
-    <span class="chip"><i class="chip-dot"></i>three instruments live</span>
+    <span class="chip"><i class="chip-dot"></i>two instruments live</span>
   </header>
 
   <div class="hero-inner">
@@ -112,8 +112,8 @@
       <span class="w it" style="--i:2">air.</span>
     </h2>
 
-    <p class="lede">A webcam watches your hands, and a guitar, a piano and a drum
-      kit answer. No uploads, no recording — the video never leaves this tab.</p>
+    <p class="lede">A webcam watches your hands, and a guitar and a piano answer.
+      No uploads, no recording — the video never leaves this tab.</p>
 
     <div class="cta-row">
       <button class="btn-go" id="to-studio">
@@ -128,7 +128,7 @@
     </div>
 
     <ul class="specs">
-      <li><span class="spec-n">03</span><span class="spec-l">instruments<br />playable now</span></li>
+      <li><span class="spec-n">02</span><span class="spec-l">instruments<br />playable now</span></li>
       <li><span class="spec-n">21</span><span class="spec-l">landmarks<br />tracked per hand</span></li>
       <li><span class="spec-n">0</span><span class="spec-l">bytes<br />ever uploaded</span></li>
       <li><span class="spec-n">60<em>fps</em></span><span class="spec-l">on the glass<br />in front of you</span></li>
@@ -150,7 +150,7 @@
         <p class="eyebrow sm"><span class="dot"></span>the studio</p>
         <h2>Pick something up.</h2>
       </div>
-      <p class="shelf-note">Three are playable today.<br />More are on the bench.</p>
+      <p class="shelf-note">Two are playable today.<br />More are on the bench.</p>
     </header>
 
     <div class="cards">
@@ -195,7 +195,11 @@
         <span class="card-edge" aria-hidden="true"></span>
       </a>
 
-      <a class="card live" href="./drums.html" style="--d:2;--a:59,227,236;--b:139,107,255">
+      <!-- `data-soon` is the whole switch: it stops the click navigating and
+           marks the card. The page still exists and still works behind it, so
+           putting drums back is removing one attribute. -->
+      <a class="card" href="./drums.html" data-soon aria-disabled="true"
+         style="--d:2;--a:59,227,236;--b:139,107,255">
         <span class="card-glow" aria-hidden="true"></span>
         <div class="card-art art-drums" aria-hidden="true">
           <span class="p"></span><span class="p"></span><span class="p"></span>
@@ -204,13 +208,13 @@
         <div class="card-body">
           <div class="card-top">
             <span class="card-ix">03</span>
-            <span class="tag tag-proto">prototype</span>
+            <span class="tag tag-soon">in development</span>
           </div>
           <h3>Air Drums</h3>
           <p>Point a finger — or pick up a pair of sticks. Bring the tip down
              through a drum and it sounds as it goes through the head; how fast
              you were going is how hard it lands.</p>
-          <span class="card-go">Play it <em>→</em></span>
+          <span class="card-go">Not ready yet</span>
         </div>
         <span class="card-edge" aria-hidden="true"></span>
       </a>
@@ -245,10 +249,18 @@
     <p class="shelf-foot">No account, no upload, no recording. Your camera feed
       is read in the page and thrown away frame by frame.</p>
 
+    <!-- The claim above is the kind nobody should take on faith, so this says
+         how to check it instead of asking to be believed. It is also carefully
+         true: the page needs the network *once*, to fetch the hand-tracking
+         model, and there is no fetch, XHR, WebSocket or beacon anywhere in the
+         source that could send anything back. -->
+    <p class="shelf-proof">Don’t take our word for it — open your browser’s
+      network tab and watch. The hand-tracking model comes down once, and
+      nothing ever goes back up.</p>
+
   </div>
 </section>
 
-<script type="module" src="./src/gate.js"></script>
 <script type="module" src="./src/intro.js"></script>
 </body>
 </html>

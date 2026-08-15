@@ -856,8 +856,43 @@ function enterStudio() {
 
   document.body.classList.add('entered');
   show(location.hash === '#apps' ? 'shelf' : 'hero');
+  try { sessionStorage.setItem(RETURNING, '1'); } catch {}
 }
 enterBtn.addEventListener('click', enterStudio);
+
+/* ---- coming back from an instrument ----
+ *
+ * The threshold is a door, and a door you have already walked through should
+ * not be standing in front of you again. Pressing Back inside Air Guitar loads
+ * this page fresh, so without this you land on the ENTER overlay with the shelf
+ * blurred out behind it — asked to enter a studio you are already in.
+ *
+ * The flag is `sessionStorage`, not `localStorage`, on purpose: within this tab
+ * you have entered, so skip it; open the site tomorrow and you get the proper
+ * arrival again. It only ever suppresses the overlay, never the music, because
+ * the music is not ours to start — a page you arrived at by navigation has no
+ * user activation, so an AudioContext built here would sit suspended. Instead
+ * the score waits for whatever you touch first.
+ */
+const RETURNING = 'air-studio.entered';
+function skipThreshold() {
+  entered = true;
+  threshold.classList.add('gone');
+  threshold.style.display = 'none';
+  document.body.classList.add('entered');
+  // `show` rather than `sync`: sync is a const declared further down and would
+  // still be in its temporal dead zone here.
+  show(location.hash === '#apps' ? 'shelf' : 'hero');
+
+  // First real gesture on the page is enough for audio; until then, silence.
+  const wake = () => {
+    removeEventListener('pointerdown', wake); removeEventListener('keydown', wake);
+    if (audio.on) { audio.ensure(); audio.start({ fade: 1.6 }); }
+  };
+  addEventListener('pointerdown', wake, { once: false });
+  addEventListener('keydown', wake, { once: false });
+}
+try { if (sessionStorage.getItem(RETURNING) === '1') skipThreshold(); } catch {}
 
 /* ---- hero → the shelf ---- */
 const goBtn = $('to-studio');
@@ -891,7 +926,19 @@ onFaceHiddenChange(paintFace);
 
 /* ---- the cards ---- */
 for (const [i, card] of [...document.querySelectorAll('.card')].entries()) {
-  card.addEventListener('pointerenter', () => audio.hover());
+  const soon = card.hasAttribute('data-soon');
+  card.addEventListener('pointerenter', () => (soon ? null : audio.hover()));
+
+  /* Unfinished instruments refuse the click where the eye already is, rather
+     than opening a page that would only disappoint. */
+  if (soon) {
+    card.addEventListener('click', (e) => {
+      e.preventDefault();
+      card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge');
+      audio.deny();
+    });
+    continue;
+  }
 
   // Tilt and the light pool are the same gesture: the card turning toward you.
   card.addEventListener('pointermove', (e) => {

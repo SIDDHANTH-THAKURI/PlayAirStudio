@@ -193,12 +193,6 @@ body.leaving .wash-layer{opacity:1;transition:opacity .55s var(--ease)}
   backdrop-filter:blur(5px);
   transition:opacity .85s var(--ease),transform 1s var(--ease),filter .85s var(--ease)}
 .threshold.gone{opacity:0;transform:scale(1.14);filter:blur(26px);pointer-events:none}
-/* The temporary access gate hides the page rather than delaying it, so the
-   whole reveal used to play out behind the gate card and be over before anyone
-   saw it. `data-locked` is the gate's own attribute; when the gate is deleted
-   this rule simply stops matching anything, which is the right way to depend on
-   something temporary. */
-html[data-locked] .threshold *{animation-play-state:paused!important}
 .th-inner{max-width:660px;display:flex;flex-direction:column;align-items:center}
 
 /* The aperture: two counter-rotating rings and a hot core. It is the only thing
@@ -506,6 +500,18 @@ body.entered .hint{animation:fadeUp 1s 1.8s var(--ease) forwards}
 .card.nudge{animation:cardIn .01s linear forwards, nudge .42s ease-out}
 @keyframes nudge{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 
+/* Not finished yet. Quiet rather than hidden — the shelf should still say a
+   third instrument is coming — and it must not offer the hover affordances of
+   something you can open, or the refusal on click reads as a broken link. */
+.card[data-soon]{cursor:not-allowed}
+.card[data-soon] .card-art{filter:grayscale(.55) brightness(.8)}
+.card[data-soon] .card-body{opacity:.72}
+.card[data-soon]:hover{--lift:0px;border-color:var(--edge);
+  box-shadow:0 1px 0 rgba(255,255,255,.07) inset, 0 30px 70px -34px rgba(0,0,0,.9)}
+.card[data-soon] .card-glow,.card[data-soon] .card-edge{opacity:0!important}
+.card[data-soon] .card-go{color:var(--dim);text-shadow:none}
+.tag-soon{color:#CBB6FF;background:rgba(var(--violet-rgb),.14);border-color:rgba(var(--violet-rgb),.34)}
+
 /* ---- card art ----
    Each instrument gets a small abstract of itself that comes alive on hover.
    Every variant must set its own justify/align: `.card-art` is the flex
@@ -632,6 +638,9 @@ body.entered .hint{animation:fadeUp 1s 1.8s var(--ease) forwards}
   .priv-switch{width:100%;padding:12px 16px}
 }
 
+.shelf-proof{margin:8px auto 0;max-width:56ch;text-align:center;
+  font-size:12px;line-height:1.65;color:var(--dim)}
+@media (max-width:620px){.shelf-proof{font-size:11.5px}}
 .shelf-foot{margin:22px 0 0;text-align:center;font-family:var(--mono);font-size:10px;
   letter-spacing:.13em;text-transform:uppercase;color:var(--dim);line-height:1.9}
 

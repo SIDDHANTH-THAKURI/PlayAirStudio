@@ -16,17 +16,24 @@
 .stage.picking { cursor: crosshair; }
 .stage.picking canvas { pointer-events: none; }
 
-/* ---------- calibration bar ---------- */
+/* ---------- calibration bar ----------
+   Lives in the panel now, directly under the button that opens it, so it
+   stacks in a ~300 px column rather than spreading along the full width of
+   the stage. */
 .calbar {
-  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
-  margin-top: 12px; padding: 11px 14px;
-  background: var(--card); border: 1px solid rgba(192, 99, 26, .34); border-radius: var(--r);
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  margin-top: 10px; padding: 11px 12px;
+  background: linear-gradient(180deg, #FFF6E8, var(--card));
+  border: 1px solid rgba(192, 99, 26, .38); border-radius: var(--r);
   box-shadow: var(--sh-s);
 }
 .calbar[hidden] { display: none; }
-.cal-hint { font-size: 13px; color: var(--ink2); }
-.cal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.cal-actions .btn { padding: 9px 16px; font-size: 13px; }
+.cal-hint { font-size: 12.5px; line-height: 1.5; color: var(--ink2); }
+/* "Use this area" is the one you want, so it gets the full width and the two
+   escape hatches share the row above it. */
+.cal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cal-actions .btn { padding: 9px 12px; font-size: 12.5px; }
+.cal-actions .btn:last-child { grid-column: 1 / -1; }
 
 /* ---------- panel bits ---------- */
 .ghost-btn.wide { width: 100%; }
@@ -35,9 +42,6 @@
 .pill.bad, .pill-quiet.bad { color: var(--rose); }
 
 @media (max-width: 720px) {
-  .calbar { flex-direction: column; align-items: stretch; }
-  .cal-actions { justify-content: stretch; }
-  .cal-actions .btn { flex: 1; }
   .np-chord { font-size: 34px; }
 }
 

@@ -141,7 +141,8 @@ export class Tracker {
     const lms = r?.landmarks || [];
     const worlds = r?.worldLandmarks || [];
     const handed = r?.handednesses || r?.handedness || [];
-    return lms.map((lm, i) => {
+    const now = performance.now() / 1000;
+    const out = lms.map((lm, i) => {
       // Mirror X so screen-space matches the mirrored <video> the player sees.
       const flipped = lm.map((p) => ({ x: 1 - p.x, y: p.y, z: p.z }));
       const w = worlds[i] ? worlds[i].map((p) => ({ x: -p.x, y: p.y, z: p.z })) : null;
@@ -151,10 +152,77 @@ export class Tracker {
       return {
         lm: flipped, world: w,
         x: (flipped[0].x + flipped[5].x + flipped[17].x) / 3,
+        y: (flipped[0].y + flipped[5].y + flipped[17].y) / 3,
+        t: now,
         label: cat?.categoryName || null, score: cat?.score ?? 0,
       };
     });
+    this._velocities(out, now);
+    return out;
   }
+
+  /**
+   * Palm velocity, in frame-widths per second, attached to each hand.
+   *
+   * This exists for *drawing*, and only for drawing. A pose is detected on one
+   * camera frame and painted over a later one, so the hand on screen is always
+   * a little behind the hand in the picture — at the measured 8.7 looks/second
+   * of a slow machine, a hand crossing the frame in a second is drawn 11.5% of
+   * a frame adrift. That is the residual "my hands are displaced" report once
+   * the coordinate mapping itself is correct, and no amount of remapping fixes
+   * it, because it is time rather than geometry.
+   *
+   * Handing the renderer a velocity lets it draw the hand where the hand now
+   * *is* rather than where it was seen. Nothing that decides anything may use
+   * this: notes, chords and strokes all keep reading the measured landmarks, so
+   * an extrapolation can never invent an event. It is also self-limiting in the
+   * one place that matters — a strike is a hand stopping, so by the instant a
+   * note fires the velocity is zero and the lead has already gone to nothing.
+   */
+  _velocities(hands, now) {
+    const prev = this._palms || (this._palms = new Map());
+    const seen = new Set();
+    for (const h of hands) {
+      const key = h.label || 'anon';
+      seen.add(key);
+      const p = prev.get(key);
+      const dt = p ? now - p.t : 0;
+      if (p && dt > 1e-4 && dt < 0.4) {
+        const vx = (h.x - p.x) / dt, vy = (h.y - p.y) / dt;
+        // Light smoothing: one noisy sample should not throw the drawn hand.
+        h.vx = p.vx + (vx - p.vx) * 0.5;
+        h.vy = p.vy + (vy - p.vy) * 0.5;
+      } else { h.vx = 0; h.vy = 0; }
+      prev.set(key, { x: h.x, y: h.y, t: now, vx: h.vx, vy: h.vy });
+    }
+    for (const k of [...prev.keys()]) if (!seen.has(k)) prev.delete(k);
+  }
+}
+
+/**
+ * How far ahead to draw a hand, given when its pose was measured.
+ * Capped hard: a big lead on a bad sample looks far worse than a small lag,
+ * and beyond ~90 ms the extrapolation stops being a fair guess.
+ */
+export function drawLead(hand, nowSec, cap = 0.09) {
+  // `!hand.t` would also reject a perfectly good timestamp of 0. It never is
+  // one in the app (`performance.now()` has always advanced), but it is in a
+  // test rig, and a guard that silently disables the thing under test is worse
+  // than no guard.
+  if (!hand || hand.t == null || !hand.vx) return { dx: 0, dy: 0 };
+  const age = Math.min(Math.max(nowSec - hand.t, 0), cap);
+  /* Trust the extrapolation less the staler the sample it came from.
+   *
+   * A velocity measured between the last two detections says where the hand
+   * was going, not where it is going, and the older the sample the weaker that
+   * claim gets — which matters most on exactly the slow trackers that need the
+   * most correction. Without the falloff, a hand moving a frame-width a second
+   * that stops abruptly between samples is drawn 9% of a frame past where it
+   * actually stopped, and an overshoot reads far worse than the lag it was
+   * meant to cure. This gives the full correction when samples are fresh and
+   * quietly backs off when they are not. */
+  const trust = Math.max(0, 1 - age / 0.22);
+  return { dx: hand.vx * age * trust, dy: hand.vy * age * trust };
 }
 
 export class Camera {

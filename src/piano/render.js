@@ -24,9 +24,10 @@ const INK = 'rgba(44,33,24,';
 const CREAM = 'rgba(255,250,242,';
 
 export class Overlay {
-  constructor(canvas) {
+  constructor(canvas, video = null) {
     this.cv = canvas;
     this.ctx = canvas.getContext('2d');
+    this.video = video;
     this.hits = [];        // recent strikes, for the bloom
   }
 
@@ -39,11 +40,25 @@ export class Overlay {
   resize() {
     const cap = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
     const r = this.cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, cap);
-    if (r.width === this.w && r.height === this.h && dpr === this.dpr) return;
-    this.w = r.width; this.h = r.height; this.dpr = dpr;
+    const vw = this.video?.videoWidth || 0, vh = this.video?.videoHeight || 0;
+    if (r.width === this.boxW && r.height === this.boxH && dpr === this.dpr
+        && vw === this.vw && vh === this.vh) return;
+    this.boxW = r.width; this.boxH = r.height; this.dpr = dpr;
+    this.vw = vw; this.vh = vh;
     this.cv.width = Math.round(r.width * dpr);
     this.cv.height = Math.round(r.height * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    /* `w`/`h` are the size the video is *painted* at, not the box. The video is
+       object-fit: cover, so any shape mismatch crops it, and multiplying a
+       landmark by the box width assumes that crop is zero. See the long note in
+       src/render.js — this is the intermittent hand-displacement bug. When the
+       shapes agree this collapses to the old arithmetic. */
+    const s = vw > 0 && vh > 0 ? Math.max(r.width / vw, r.height / vh) : 0;
+    this.w = s ? vw * s : r.width;
+    this.h = s ? vh * s : r.height;
+    this.ox = (r.width - this.w) / 2;
+    this.oy = (r.height - this.h) / 2;
+    this.ctx.setTransform(dpr, 0, 0, dpr, this.ox * dpr, this.oy * dpr);
   }
 
   /**
@@ -222,6 +237,14 @@ export class Overlay {
   _hand(f, hand) {
     const { ctx } = this;
     const col = HAND_COL[hand.id] || HAND_COL.right;
+    /* Slide the drawn hand forward by however stale its pose is. The whole
+     * hand moves together — a single translation, not per-landmark
+     * extrapolation — so the shape you read is exactly the shape that was
+     * measured, only in the right place. It falls to zero as the hand slows,
+     * which is to say it is already gone by the time a note fires. */
+    const lead = hand.lead;
+    const shifted = lead && (lead.dx || lead.dy);
+    if (shifted) { ctx.save(); ctx.translate(lead.dx * this.w, lead.dy * this.h); }
     for (let i = 0; i < hand.tips.length; i++) {
       const tip = hand.tips[i];
       const x = tip.x * this.w, y = tip.y * this.h;
@@ -253,6 +276,7 @@ export class Overlay {
       ctx.strokeStyle = falling ? CREAM + '0.95)' : col;
       ctx.stroke();
     }
+      if (shifted) ctx.restore();
   }
 
   _prompt(text, warn = false) {

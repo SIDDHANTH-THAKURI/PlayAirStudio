@@ -1,11 +1,12 @@
 /** main.js — wiring: camera → tracking → tap detection → notes → audio + UI. */
-import { Tracker, Camera, IS_MOBILE } from '../tracking.js';
+import { Tracker, Camera, IS_MOBILE, drawLead } from '../tracking.js';
 import { TapDetector, FINGER_NAMES, SURFACES, FINGER_SETS } from './onset.js';
 import { TablePlane, defaultQuad, quadIsSane } from './geometry.js';
 import { Keyboard, SCALES, NOTE_NAMES, midiName } from './scales.js';
 import { PianoEngine, LOOKAHEAD } from './audio.js';
 import { Overlay, HAND_COL } from './render.js';
-import { Tour } from './tour.js';
+import { Tutorial } from '../tutorial.js';
+import { PIANO_SLIDES } from './tutorial.js';
 import { FaceVeil, faceHidden, setFaceHidden, onFaceHiddenChange } from '../privacy.js';
 
 const $ = (id) => document.getElementById(id);
@@ -64,7 +65,7 @@ S.running = false;
 const tracker = new Tracker(), camera = new Camera(el.video);
 const detector = new TapDetector();
 const piano = new PianoEngine();
-const overlay = new Overlay(el.canvas);
+const overlay = new Overlay(el.canvas, el.video);
 
 /* Face blur — free until switched on; see src/privacy.js. */
 const faceVeil = new FaceVeil(el.video, el.stage);
@@ -272,58 +273,16 @@ el.stage.addEventListener('click', (e) => {
  * It runs after the camera is live, so every step points at something real and
  * the player can try each one as it is described.
  */
-const tour = new Tour({
-  root: $('tour'), hole: $('tourHole'), card: $('tourCard'),
+const tour = new Tutorial({
+  slides: PIANO_SLIDES,
+  seenKey: 'air-piano.tutorial.v1',
   onDone: () => {
     S.toured = true; persist();
-    // The reason the tour exists is to arrive here knowing what this is for.
+    // The reason the walkthrough exists is to arrive here knowing what this is
+    // for, so it hands straight over to marking out the playing area.
     if (!S.corners) startCalibration();
   },
 });
-
-function tourSteps() {
-  const where = S.surface === 'air' ? 'in the air in front of you' : 'on your desk';
-  return [
-    {
-      target: 'stage',
-      title: 'There is no keyboard',
-      body: `You mark out a rectangle ${where}, and that rectangle becomes the keys.
-        Your webcam watches your hands — the video is read in this tab and thrown
-        away frame by frame.`,
-    },
-    {
-      target: 'calBtn',
-      title: 'Mark out your playing area',
-      body: `<b>Click</b> the four corners of that rectangle in the camera view —
-        far-left, far-right, near-right, near-left — then <b>Use this area</b>.
-        Click any corner afterwards to nudge it. It is remembered, so this is a
-        once-per-setup job; redo it if you move the camera.`,
-    },
-    {
-      target: 'stage',
-      title: 'Strike, don\'t press',
-      body: `A note fires the instant your fingertip is <b>stopped</b>, which is why
-        a crisp tap speaks and slowly lowering your hand doesn't — that is what
-        lets you rest between phrases. <b>How hard you strike is how loud it is.</b>`,
-    },
-    {
-      target: 'segFingers',
-      title: 'One finger, if ten is too many',
-      body: `Tap a note and its neighbours tend to come down with it. On
-        <b>All fingers</b> the instrument works out which one actually reached;
-        on <b>Index only</b> there is nothing to work out, and nothing else can
-        misfire. Start on <i>Index only</i> if notes keep arriving in pairs.`,
-    },
-    {
-      target: 'segSurface',
-      title: 'Air or desk, and everything else',
-      body: `<b>Air</b> needs no surface and lets you keep looking at the screen.
-        <b>Desk</b> gives you something to feel, but wants the lid tilted down at
-        it. Key, scale, how many keys, note length and volume are all down this
-        panel — and <b>How to play</b> has the long version of all of it.`,
-    },
-  ];
-}
 
 /* ---------------- controls ---------------- */
 function rebuild() { keyboard = new Keyboard(S); paintRange(); paintCalBtn(); }
@@ -396,7 +355,7 @@ function initControls() {
     // open behind the cards and finish by reopening it, so close that first.
     if (calibrating) endCalibration(false);
     $('helpModal').hidden = true;
-    tour.start(tourSteps());
+    tour.open(0);
   };
   $('helpBtn').onclick = () => ($('helpModal').hidden = false);
   $('helpClose').onclick = () => ($('helpModal').hidden = true);
@@ -497,7 +456,7 @@ async function boot() {
    * out the area when it finishes or is skipped. After that the default quad is
    * only a guess at where the desk is, so send people straight into marking it
    * out rather than letting them wonder why the keys are in the wrong place. */
-  if (!S.toured) tour.start(tourSteps());
+  if (!S.toured) tour.open(0);
   else if (!S.corners) startCalibration();
 }
 
@@ -580,6 +539,9 @@ function frame() {
 
   const overlayHands = live.map((h) => ({
     id: h.id,
+    // Where this pose will be by the time it is painted. Drawing only — the
+    // detector above has already run on the measured landmarks. See `drawLead`.
+    lead: drawLead(h, t),
     tips: [4, 8, 12, 16, 20].map((i) => h.lm[i]),
     states: [0, 1, 2, 3, 4].map((f) => detector.state(h.id, f)),
     // Which fingers can actually play, so the ones that can't say so rather

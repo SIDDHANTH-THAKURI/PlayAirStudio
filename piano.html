@@ -19,7 +19,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <a class="brand-back" href="./index.html" aria-label="Back to Air Studio">←</a>
+      <a class="brand-back" href="./index.html#apps" aria-label="Back to the instruments">←</a>
       <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
         <g>
           <rect x="5" y="9" width="6" height="22" rx="1.5" fill="none" stroke="#C46A1F" stroke-width="1.6"/>
@@ -60,15 +60,6 @@
         <div class="veil" id="veil"><div class="veil-card" id="veilCard"></div></div>
       </div>
 
-      <!-- Only visible while marking out the desk. -->
-      <div class="calbar" id="calBar" hidden>
-        <span class="cal-hint" id="calHint">Click the four corners of the area you want to play on.</span>
-        <div class="cal-actions">
-          <button class="btn sec" id="calReset">Reset</button>
-          <button class="btn sec" id="calCancel">Cancel</button>
-          <button class="btn" id="calUse" disabled>Use this area</button>
-        </div>
-      </div>
     </section>
 
     <aside class="panel">
@@ -83,6 +74,21 @@
 
         <div class="ctl">
           <button class="ghost-btn wide" id="calBtn">Mark out my desk…</button>
+
+          <!-- The calibration controls live here, directly under the button
+               that opens them, rather than beneath the stage. Below the video
+               they were off the bottom of the screen on most laptops: you
+               pressed "Mark out", clicked four corners, and nothing appeared to
+               happen — so you pressed "Mark out" again and started over. -->
+          <div class="calbar" id="calBar" hidden>
+            <span class="cal-hint" id="calHint">Click the four corners of the area you want to play on.</span>
+            <div class="cal-actions">
+              <button class="btn sec" id="calReset">Reset</button>
+              <button class="btn sec" id="calCancel">Cancel</button>
+              <button class="btn" id="calUse" disabled>Use this area</button>
+            </div>
+          </div>
+
           <div class="ctl-note">Range <span id="rangeNote">—</span></div>
           <div class="ctl-note">Latency <span id="latNote">—</span></div>
         </div>
@@ -282,12 +288,6 @@
 
 <!-- The first-run walkthrough. Points at the real controls rather than
      describing them, so it dims the page around one thing at a time. -->
-<div class="tour" id="tour" hidden>
-  <div class="tour-hole" id="tourHole"></div>
-  <div class="tour-card" id="tourCard" role="dialog" aria-live="polite" aria-label="Getting started"></div>
-</div>
-
-<script type="module" src="./src/gate.js"></script>
 <script type="module" src="./src/piano/main.js"></script>
 </body>
 </html>

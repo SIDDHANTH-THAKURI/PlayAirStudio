@@ -1,5 +1,5 @@
 /** main.js — wiring: camera → tracking → gestures → strings/patterns → audio + UI. */
-import { Tracker, Camera, IS_MOBILE } from './tracking.js';
+import { Tracker, Camera, IS_MOBILE, drawLead } from './tracking.js';
 import { GestureEngine, SIGNS, STRUM_SIGNS, STRING_LABELS, GRID_Y0, GRID_Y1 } from './gestures.js';
 import { FaceVeil, faceHidden, setFaceHidden, onFaceHiddenChange } from './privacy.js';
 import { GuitarEngine } from './audio.js';
@@ -44,7 +44,7 @@ const cfg = () => ({
 });
 
 const tracker = new Tracker(), camera = new Camera(el.video),
-      gestures = new GestureEngine(), guitar = new GuitarEngine(), overlay = new Overlay(el.canvas);
+      gestures = new GestureEngine(), guitar = new GuitarEngine(), overlay = new Overlay(el.canvas, el.video);
 
 /* Face blur. Constructing it is free — no model, no DOM, no inference until
    `set(true)` — so it can be wired unconditionally and left off. */
@@ -537,6 +537,7 @@ function frame() {
   overlay.draw({
     now: t, layout: L, cfg: C, bank, slot: S.slot, voicing: voicing(),
     fret, pluck, fretLm: gestures.fretLm, pluckLm: gestures.pluckLm,
+    fretLead: drawLead(gestures.fretHand, t), pluckLead: drawLead(gestures.pluckHand, t),
     wheelLabels: { fret: ['Chord grid', 'Sign chords'], pluck: ['Fingerstyle', 'Strumming'] },
     patternLabel, stringLabel: pluck.target >= 0 ? STRING_LABELS[pluck.target] : '',
   });

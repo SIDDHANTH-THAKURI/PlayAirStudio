@@ -111,27 +111,18 @@ try {
   console.log('\nlanding');
   await send('Page.navigate', { url: HOME });
   // Wait for the module, not the markup — the DOM exists before intro.js runs.
-  await waitFor(`!!window.airGate`, 20000, 'access gate');
-  /* The temporary access gate. Worth testing that it does what it claims —
-   * and worth being clear that what it claims is small: it is a client-side
-   * check on a static site, so it keeps a casual visitor out and nothing else.
-   * See the note at the top of src/gate.js. */
-  ok(await evl(`airGate.locked === true`), 'the site is gated');
-  ok(await evl(`!!document.querySelector('.gate')`), 'and says so');
-  ok(await evl(`getComputedStyle(document.getElementById('hero')).visibility === 'hidden'`),
-    'the page underneath is hidden, not merely covered');
-  ok(await evl(`airGate.unlock('nope') === false && airGate.locked === true`), 'a wrong key is refused');
-  ok(await evl(`airGate.unlock('  Siddhanth ') === true`), 'the right key opens it, trimmed and case-insensitive');
-  ok(await evl(`!document.querySelector('.gate') && airGate.locked === false`), 'and the gate goes away');
-  ok(await evl(`localStorage.getItem('air-studio.access') === 'siddhanth'`), 'and is remembered');
-
+  /* The temporary access gate is gone. Assert its absence rather than just
+   * deleting the tests: a stray `gate.js` left in one page's <script> tags
+   * would lock that page and nothing else here would notice. */
   await waitFor(`!!window.airStudio`, 20000, 'intro module');
+  ok(await evl(`!window.airGate && !document.querySelector('.gate')`),
+    'no access gate stands in front of the site any more');
   ok(true, 'intro loads');
-  // `visibility` is transitioned on .scene, so it is mid-flight for half a
-  // second after the gate lets go of it — wait for the value rather than race it.
+  // `visibility` is transitioned on .scene, so it is mid-flight for a moment
+  // after load — wait for the value rather than race it.
   await waitFor(`getComputedStyle(document.getElementById('hero')).visibility === 'visible'`,
     4000, 'hero to fade in');
-  ok(true, 'hero scene is the one showing once the gate releases it');
+  ok(true, 'the hero is the scene showing on arrival');
   ok(await evl(`document.getElementById('bg').width > 0`), 'the string canvas sized itself');
   // The landing page must stay silent — count every AudioContext ever built.
   await evl(`(() => { window.__ac = 0;
@@ -155,10 +146,10 @@ try {
   ok(await evl(`!!document.getElementById('threshold')
     && getComputedStyle(document.getElementById('threshold')).opacity === '1'`),
     'the threshold overlay is up, and nothing has made a sound yet');
-  // Its reveal is held until the gate lets go, so it is only just starting now.
+  // The letter stagger and the orb settle about 2.4 s in.
   await sleep(2600);
   ok(await evl(`getComputedStyle(document.getElementById('enter')).opacity === '1'`),
-    'the threshold reveal waits for the gate rather than playing behind it');
+    'the threshold reveal finishes and the orb is pressable');
   const gateShot = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(new URL('./screenshot-threshold.png', import.meta.url), Buffer.from(gateShot.result.data, 'base64'));
 
@@ -189,11 +180,20 @@ try {
   ok(await evl(`getComputedStyle(document.getElementById('shelf')).visibility === 'visible'`),
     'shelf scene is showing');
   ok(await evl(`document.querySelectorAll('.card').length === 3
-    && document.querySelectorAll('.card.live').length === 3
-    && document.querySelectorAll('.card[data-soon]').length === 0`),
-    'three instruments listed, all playable');
+    && document.querySelectorAll('.card.live').length === 2
+    && document.querySelectorAll('.card[data-soon]').length === 1`),
+    'three instruments listed, two playable and one held back');
   ok(await evl(`[...document.querySelectorAll('.card.live')].map(c => c.getAttribute('href')).sort().join(' ')
-    === './drums.html ./piano.html ./play.html'`), 'each one points at its app');
+    === './piano.html ./play.html'`), 'each playable one points at its app');
+  /* Held back means held back: the click must not navigate. Drums is unfinished
+   * and the page refuses to start, so a card that still opened it would drop
+   * the player on a dead end. */
+  ok(await evl(`(() => {
+    const c = document.querySelector('.card[data-soon]');
+    const before = location.href;
+    c.click();
+    return location.href === before;
+  })()`), 'the unfinished card refuses to open');
   await sleep(1400);
   const rowTops = await evl(`(() => [...document.querySelectorAll('.card')]
     .map(n => Math.round(n.getBoundingClientRect().top)))()`);
@@ -541,6 +541,41 @@ try {
   ok(Math.abs(healed.vid - healed.box) < 0.02,
     'and it heals on its own — nothing had to fire the resize event',
     `video ${healed.vid.toFixed(3)} vs box ${healed.box.toFixed(3)}`);
+
+  /* …and the overlay is now correct *during* the mismatch, not merely after it.
+   *
+   * Everything above keeps the box matched to the camera, which is the right
+   * thing to want, but it is a race: the CSS starts at a guessed aspect before
+   * the camera reports anything, `resize` is not guaranteed for every stream
+   * renegotiation, and the self-heal tolerates 2% and runs a few times a
+   * second. Every one of those windows used to draw both hands off the real
+   * ones — the intermittent displacement report. The overlay now reproduces
+   * `object-fit: cover` itself, so the mapping holds whatever the box is doing.
+   *
+   * Measured synchronously right after skewing, so no heal can intervene. */
+  const fit = await evl(`(() => {
+    const s = document.getElementById('stage'), v = document.getElementById('video');
+    s.style.aspectRatio = '1.2';
+    void s.getBoundingClientRect();
+    airGuitar.overlay.resize();
+    const o = airGuitar.overlay, vw = v.videoWidth, vh = v.videoHeight;
+    const sc = Math.max(o.boxW / vw, o.boxH / vh);      // what cover does
+    return { w: o.w, h: o.h, ox: o.ox, oy: o.oy,
+             wantW: vw * sc, wantH: vh * sc,
+             wantOx: (o.boxW - vw * sc) / 2, wantOy: (o.boxH - vh * sc) / 2,
+             mapped: o.ox + 0.9 * o.w, naive: 0.9 * o.boxW };
+  })()`);
+  ok(Math.abs(fit.w - fit.wantW) < 0.5 && Math.abs(fit.h - fit.wantH) < 0.5
+    && Math.abs(fit.ox - fit.wantOx) < 0.5 && Math.abs(fit.oy - fit.wantOy) < 0.5,
+    'the overlay reproduces object-fit: cover while the box is out of shape',
+    `w ${fit.w.toFixed(1)}/${fit.wantW.toFixed(1)} · ox ${fit.ox.toFixed(1)}/${fit.wantOx.toFixed(1)}`);
+  // Guard against a vacuous pass: prove the new mapping and the old one differ
+  // here, so this test would actually have caught the bug.
+  ok(Math.abs(fit.mapped - fit.naive) > 4,
+    'and that materially differs from multiplying by the box width',
+    `x@0.9 → ${fit.mapped.toFixed(1)} px, was ${fit.naive.toFixed(1)} px`);
+  await evl(`document.getElementById('stage').style.aspectRatio = ''; true`);
+  await sleep(500);
 
   /* Regression: the overlay caches the canvas width and height and maps every
    * normalised landmark through them, but it was only told to re-measure on a

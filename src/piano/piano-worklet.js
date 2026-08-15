@@ -95,9 +95,24 @@ class Voice {
     // and so are the stiffest; the treble climbs again. Small numbers, large
     // audible consequences.
     const B = 0.0004 + 0.0016 * Math.exp(-(midi - 21) / 26) + 0.0000009 * Math.max(0, midi - 74) ** 2;
-    // Longer strings ring longer — roughly an order of magnitude from the
-    // bottom of the keyboard to the top.
-    const t60 = Math.max(0.55, 13 * Math.pow(hz / 55, -0.62)) * (0.45 + 1.15 * sustain);
+    /* Longer strings ring longer — roughly an order of magnitude from the
+     * bottom of the keyboard to the top.
+     *
+     * The coefficient is 5.5 rather than the 13 a pedalled grand measures,
+     * and that is a playability decision rather than a modelling one. On a
+     * real piano a low note rings that long *because you can stop it* — you
+     * lift the key, or the pedal. Tapping a desk gives no key release at all,
+     * so in the default 'pedal' damper mode nothing ever ends a note early:
+     * every strike runs its full course. At 13 a left-hand note was audible
+     * for 22.9 s measured, and since the register split puts the left hand two
+     * octaves down, an ordinary bass line stacked a dozen 20-second voices on
+     * top of each other. That is the "loud continuous weird sound".
+     *
+     * Scaled uniformly rather than compressed: the ratio between bass and
+     * treble is a real property of strings and the tests check it, so the
+     * whole curve moves and its shape does not. `sustain` still scales this
+     * either way, so a longer tail is one slider away. */
+    const t60 = Math.max(0.55, 5.5 * Math.pow(hz / 55, -0.62)) * (0.45 + 1.15 * sustain);
     const nyq = sr * 0.47;
     /* Hammer strike point, as a fraction of the string. Real actions strike
      * nearer the end in the treble; the ratio is why partial 8 (and 16) all but
@@ -138,7 +153,12 @@ class Voice {
          * quieter, and ringing well over twice as long. Quiet enough to stay
          * out of the way of the attack, persistent enough to still be there
          * when the prompt sound has gone — which is the aftersound. */
-        n = this._mode(n, f + detune, amp * 0.35, dp * 2.4, sr, reused);
+        /* …capped in absolute terms as well as relative. 2.4× is what makes
+         * the two-stage tail, but 2.4× of a bass note's decay is half a minute
+         * of aftersound that nothing can stop. The cap only ever binds in the
+         * bottom octave — at C4 the partner is 5.5 s and passes straight
+         * through — so the bend the tests measure is untouched. */
+        n = this._mode(n, f + detune, amp * 0.35, Math.min(dp * 2.4, 9), sr, reused);
       }
     }
     this.n = n;

@@ -36,3 +36,27 @@
   .np-chord { font-size: 28px; }
   .legend { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ---------- in-development screen ----------
+   Shown instead of the instrument while Air Drums is held back. It replaces
+   the app rather than covering it, so nothing behind it is running. */
+.soon-screen{position:fixed;inset:0;display:grid;place-items:center;padding:28px;
+  background:
+    radial-gradient(900px 520px at 20% -10%, #FFF6E4 0%, transparent 60%),
+    radial-gradient(760px 460px at 90% 4%, #FDEEDC 0%, transparent 58%),
+    linear-gradient(180deg, #FBF6EC 0%, #F1E5D3 100%)}
+.soon-card{width:min(460px,100%);text-align:center;background:var(--card);
+  border:1px solid var(--line);border-radius:20px;padding:34px 30px;
+  box-shadow:0 2px 6px rgba(80,55,30,.08), 0 26px 60px -22px rgba(90,60,25,.34)}
+.soon-mark{display:flex;justify-content:center;align-items:flex-end;gap:9px;height:38px;margin-bottom:18px}
+.soon-mark span{width:12px;height:12px;border-radius:50%;border:2px solid var(--wood);
+  animation:soonBob 1.8s ease-in-out infinite}
+.soon-mark span:nth-child(2){width:18px;height:18px;animation-delay:.18s}
+.soon-mark span:nth-child(3){animation-delay:.36s}
+@keyframes soonBob{0%,100%{transform:translateY(0);opacity:.5}50%{transform:translateY(-7px);opacity:1}}
+.soon-kicker{margin:0;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3)}
+.soon-card h1{font-family:var(--disp);font-weight:600;font-size:27px;letter-spacing:-.02em;
+  margin:8px 0 10px;color:var(--ink)}
+.soon-body{margin:0 0 22px;font-size:14px;line-height:1.65;color:var(--ink2)}
+.soon-foot{margin:16px 0 0;font-size:12px;color:var(--ink3)}
+@media (prefers-reduced-motion:reduce){.soon-mark span{animation:none}}

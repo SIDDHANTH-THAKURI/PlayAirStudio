@@ -37,7 +37,7 @@ function timeline(frames, hold = 1.1, morph = 0.45) {
   };
 }
 
-const SLIDES = [
+export const GUITAR_SLIDES = [
   {
     id: 'welcome',
     title: 'Two hands, one guitar',
@@ -289,18 +289,26 @@ function dial(ctx, w, h, stage) {
  *  The overlay
  * ================================================================== */
 
+/**
+ * The walkthrough shell: a deck of illustrated slides with dots, keys and a
+ * canvas. It carries no knowledge of any particular instrument — the guitar
+ * and the piano hand it their own `slides`, so there is one implementation of
+ * the navigation, the animation loop and the accessibility plumbing rather
+ * than two that drift apart.
+ */
 export class Tutorial {
-  constructor({ onDone } = {}) {
+  constructor({ onDone, slides = GUITAR_SLIDES, seenKey = SEEN, label = 'How to play' } = {}) {
     this.onDone = onDone || (() => {});
+    this.slides = slides; this.seenKey = seenKey; this.label = label;
     this.i = 0; this.t0 = 0; this.raf = 0;
     this.build();
   }
 
-  static seen() {
-    try { return localStorage.getItem(SEEN) === '1'; } catch { return false; }
+  static seen(key = SEEN) {
+    try { return localStorage.getItem(key) === '1'; } catch { return false; }
   }
-  static markSeen() {
-    try { localStorage.setItem(SEEN, '1'); } catch {}
+  static markSeen(key = SEEN) {
+    try { localStorage.setItem(key, '1'); } catch {}
   }
 
   build() {
@@ -308,7 +316,7 @@ export class Tutorial {
     root.className = 'tut';
     root.hidden = true;
     root.innerHTML = `
-      <div class="tut-card" role="dialog" aria-modal="true" aria-label="How to play Air Guitar">
+      <div class="tut-card" role="dialog" aria-modal="true" aria-label="How to play">
         <button class="tut-skip" data-act="skip">Skip</button>
         <div class="tut-body">
           <div class="tut-stage">
@@ -355,7 +363,7 @@ export class Tutorial {
     addEventListener('resize', () => this.resize());
 
     root.querySelector('.tut-dots').innerHTML =
-      SLIDES.map((_, i) => `<button class="tut-dot" data-dot="${i}" aria-label="Step ${i + 1}"></button>`).join('');
+      this.slides.map((_, i) => `<button class="tut-dot" data-dot="${i}" aria-label="Step ${i + 1}"></button>`).join('');
   }
 
   open(from = 0) {
@@ -367,7 +375,7 @@ export class Tutorial {
   }
 
   close() {
-    Tutorial.markSeen();
+    Tutorial.markSeen(this.seenKey);
     this.root.hidden = true;
     document.body.classList.remove('tut-open');
     cancelAnimationFrame(this.raf); this.raf = 0;
@@ -375,20 +383,20 @@ export class Tutorial {
   }
 
   go(i, force = false) {
-    if (i >= SLIDES.length) return this.close();
-    const n = Math.max(0, Math.min(SLIDES.length - 1, i));
+    if (i >= this.slides.length) return this.close();
+    const n = Math.max(0, Math.min(this.slides.length - 1, i));
     if (n === this.i && !force) return;
     this.i = n; this.t0 = performance.now() / 1000;
-    const s = SLIDES[n];
+    const s = this.slides[n];
     const r = this.root;
-    r.querySelector('.tut-step').textContent = `Step ${n + 1} of ${SLIDES.length}`;
+    r.querySelector('.tut-step').textContent = `Step ${n + 1} of ${this.slides.length}`;
     r.querySelector('h2').textContent = s.title;
     r.querySelector('.tut-lede').textContent = s.lede;
     r.querySelector('.tut-list').innerHTML = s.bullets
       .map(([g, t]) => `<li><span class="tut-g">${g}</span><span>${t}</span></li>`).join('');
     [...r.querySelectorAll('.tut-dot')].forEach((d, k) => d.classList.toggle('on', k === n));
     r.querySelector('[data-act="back"]').disabled = n === 0;
-    r.querySelector('[data-act="next"]').textContent = n === SLIDES.length - 1 ? 'Start playing' : 'Next';
+    r.querySelector('[data-act="next"]').textContent = n === this.slides.length - 1 ? 'Start playing' : 'Next';
     const text = r.querySelector('.tut-text');
     text.classList.remove('in'); void text.offsetWidth; text.classList.add('in');
   }
@@ -411,7 +419,7 @@ export class Tutorial {
     // Reduced motion: freeze each slide on its first keyframe rather than
     // cycling. The pose still teaches the shape; the movement is the garnish.
     const t = reduced ? 0.4 : performance.now() / 1000 - this.t0;
-    const s = SLIDES[this.i];
+    const s = this.slides[this.i];
 
     ctx.clearRect(0, 0, w, h);
     const frame = s.script(t);

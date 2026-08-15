@@ -55,7 +55,7 @@ S.running = false;
 const tracker = new Tracker(), camera = new Camera(el.video);
 const detector = new StickDetector();
 const drums = new DrumEngine();
-const overlay = new Overlay(el.canvas);
+const overlay = new Overlay(el.canvas, el.video);
 
 /* Face blur — free until switched on; see src/privacy.js. */
 const faceVeil = new FaceVeil(el.video, el.stage);

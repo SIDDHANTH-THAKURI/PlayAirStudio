@@ -80,16 +80,20 @@ body{
    back, and the decoded frames the tracker sees are untouched by definition.
 
    The mask feathers the edge — a hard-edged blurred rectangle reads as a
-   redaction box, and this is meant to look deliberate. `transition` covers the
-   5 Hz detection rate: the element only gets a new position five times a
-   second, and easing between them is what makes it look like it is following
-   a head rather than teleporting after one. */
+   redaction box, and this is meant to look deliberate.
+
+   The transition is deliberately short. It used to be 220 ms, sized to bridge a
+   5 Hz detection rate, and that easing *was* most of the lag people saw: the
+   veil spent the whole interval travelling to where the face had already been.
+   Detection now runs at ~15 Hz and the box is extrapolated along its own
+   velocity every frame, so the element already gets a fresh position per paint
+   and the transition only needs to take the edge off sub-pixel jitter. */
 .face-veil{position:absolute;z-index:2;pointer-events:none;border-radius:50%;
   backdrop-filter:blur(26px) saturate(.7);-webkit-backdrop-filter:blur(26px) saturate(.7);
   background:rgba(237,226,210,.16);
   -webkit-mask-image:radial-gradient(closest-side,#000 58%,rgba(0,0,0,.55) 78%,transparent 100%);
   mask-image:radial-gradient(closest-side,#000 58%,rgba(0,0,0,.55) 78%,transparent 100%);
-  transition:left .22s linear,top .22s linear,width .22s linear,height .22s linear}
+  transition:left .06s linear,top .06s linear,width .12s linear,height .12s linear}
 /* No face, no model, or the face just went missing: cover everything. This is
    the fail-closed state — see the note at the top of src/privacy.js. */
 .face-veil.all{left:0;top:0;width:100%;height:100%;border-radius:0;
@@ -144,7 +148,25 @@ body{
 @keyframes hit{0%{transform:translateY(-3px) scale(1.055)}100%{transform:translateY(-3px) scale(1)}}
 
 /* ---------- panel ---------- */
+/* The panel scrolls itself, rather than making you scroll the page.
+   Every control in here is something you reach for *while* looking at the
+   stage — so scrolling the window to get at one takes the video off screen,
+   and you have to scroll back up to see the effect of what you just changed.
+   Sticking it to the viewport and giving it its own overflow keeps the camera
+   in view the whole time. Below the stacking breakpoint the panel sits under
+   the video instead of beside it, where a fixed height would be nonsense, so
+   the whole thing is scoped to the two-column layout. */
 .panel{display:flex;flex-direction:column;gap:14px}
+@media (min-width:1021px){
+  .panel{position:sticky;top:14px;max-height:calc(100vh - 28px);
+    overflow-y:auto;overscroll-behavior:contain;
+    padding-right:6px;margin-right:-6px;      /* room for the bar, no reflow */
+    scrollbar-width:thin;scrollbar-color:rgba(44,33,24,.28) transparent}
+  .panel::-webkit-scrollbar{width:8px}
+  .panel::-webkit-scrollbar-thumb{background:rgba(44,33,24,.22);border-radius:99px}
+  .panel::-webkit-scrollbar-thumb:hover{background:rgba(44,33,24,.34)}
+  .panel::-webkit-scrollbar-track{background:transparent}
+}
 .nowplaying{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px 14px;box-shadow:var(--sh-s);
   text-align:center;transition:box-shadow .2s}
 .nowplaying.pulse{animation:np .38s ease-out}

@@ -20,17 +20,35 @@ const clamp = (v,a,b)=>v<a?a:v>b?b:v;
 const TAU = Math.PI * 2;
 
 export class Overlay {
-  constructor(canvas) {
+  constructor(canvas, video = null) {
     this.cv = canvas; this.ctx = canvas.getContext('2d');
+    this.video = video;
     this.strings = Array.from({ length: 6 }, () => ({ amp: 0, t0: -9, freq: 9 }));
   }
   /**
-   * Re-measure the canvas.
+   * Re-measure the canvas, and lay it over the video the way the browser does.
    *
-   * `w`/`h` are what every normalised landmark is multiplied by, so if they
-   * lag the real canvas by even a little, every hand is drawn in the wrong
-   * place — and by a lot if the stage changed size a lot. Cheap to call, and
-   * a no-op when nothing moved, so it is safe to hang off a ResizeObserver.
+   * `w`/`h` are what every normalised landmark is multiplied by. They are *not*
+   * the canvas box: they are the size the video is actually painted at inside
+   * that box, which is a different thing whenever the two disagree in shape.
+   *
+   * The video is `object-fit: cover`, so the browser scales the frame by the
+   * larger of the two ratios and centres the overflow — cropping whatever does
+   * not fit. Multiplying a landmark by the *box* width instead silently assumes
+   * the crop is zero. It usually is, because `syncStage()` works to keep the
+   * box matched to the camera, but "usually" is doing a lot of work there: the
+   * CSS starts at a guessed 16/9 before the camera has reported anything, the
+   * `resize` event is not guaranteed for every stream renegotiation, and the
+   * self-heal tolerates 2% and only runs a few times a second. Every one of
+   * those windows drew the hands somewhere the hands were not, which is what
+   * the intermittent "both hands are displaced" report was.
+   *
+   * So reproduce `cover` exactly rather than depending on it never happening.
+   * When the shapes do match this collapses to the old arithmetic — `ox`/`oy`
+   * are zero and `w`/`h` are the box — so the common path is unchanged.
+   *
+   * Note `dw >= boxW` and `dh >= boxH` always hold for cover, so the offsets
+   * are never positive and clearing `(0,0,w,h)` still wipes the whole canvas.
    */
   resize() {
     // Phones ship dpr 3, which triples every fill in this overlay for detail
@@ -38,14 +56,23 @@ export class Overlay {
     // free visually and buys back real frame time next to the tracker.
     const cap = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
     const r = this.cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, cap);
+    const vw = this.video?.videoWidth || 0, vh = this.video?.videoHeight || 0;
     // Bail when nothing changed. Writing canvas.width resets the whole 2D
     // context — transform, styles, the lot — so doing it every frame would be
     // both wasteful and a way to lose state; it also keeps a ResizeObserver
     // from ping-ponging with itself.
-    if (r.width === this.w && r.height === this.h && dpr === this.dpr) return;
-    this.w = r.width; this.h = r.height; this.dpr = dpr;
+    if (r.width === this.boxW && r.height === this.boxH && dpr === this.dpr
+        && vw === this.vw && vh === this.vh) return;
+    this.boxW = r.width; this.boxH = r.height; this.dpr = dpr;
+    this.vw = vw; this.vh = vh;
     this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const s = vw > 0 && vh > 0 ? Math.max(r.width / vw, r.height / vh) : 0;
+    this.w = s ? vw * s : r.width;
+    this.h = s ? vh * s : r.height;
+    this.ox = (r.width - this.w) / 2;
+    this.oy = (r.height - this.h) / 2;
+    this.ctx.setTransform(dpr, 0, 0, dpr, this.ox * dpr, this.oy * dpr);
   }
   /** Seed string animation from actually scheduled hits. */
   onStrum(res, now) {
@@ -71,7 +98,7 @@ export class Overlay {
       f.cfg.playMode === 'finger' ? 'open 1–5 fingers for a string' : 'hold a sign for a pattern');
 
     if (f.fret?.present) {
-      this.drawHand(f.fretLm, () => C.deep + '.8)', f.fret.dead, f.fret.vibrato);
+      this.drawHand(f.fretLm, () => C.deep + '.8)', f.fret.dead, f.fret.vibrato, null, f.fretLead);
       this.drawFretCue(f);
     }
     if (f.pluck?.present) this.drawPluckHand(f);
@@ -268,7 +295,7 @@ export class Overlay {
     const { ctx, w, h } = this;
     const lm = f.pluckLm; if (!lm) return;
     const P = f.pluck;
-    this.drawHand(lm, () => C.sage + '.8)', false, 0, FCOL);
+    this.drawHand(lm, () => C.sage + '.8)', false, 0, FCOL, f.pluckLead);
     if (P.wheel.open) { this.drawWheel(P, f.wheelLabels.pluck, lm); return; }
     if (P.wheel.arm01 > 0.02) { this.drawArm(lm, P.wheel.arm01, '👍'); return; }
 
@@ -362,9 +389,19 @@ export class Overlay {
     ctx.textBaseline = 'alphabetic';
   }
 
-  drawHand(lm, col, fist, vib, tipCols = null) {
+  /**
+   * @param lead {dx,dy} in frame units — how far ahead to paint this hand.
+   *   A pose is measured on one camera frame and drawn over a later one, so
+   *   without this the hand on screen always trails the hand in the picture.
+   *   The whole hand is translated together, so the shape is exactly the
+   *   measured one; and the lead is proportional to speed, so it is already
+   *   nothing by the time a hand has stopped to play something.
+   */
+  drawHand(lm, col, fist, vib, tipCols = null, lead = null) {
     if (!lm) return;
     const { ctx, w, h } = this;
+    const shifted = lead && (lead.dx || lead.dy);
+    if (shifted) { ctx.save(); ctx.translate(lead.dx * w, lead.dy * h); }
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.shadowColor = col().replace(/[\d.]+\)$/, '.5)'); ctx.shadowBlur = 10;
     ctx.strokeStyle = col(); ctx.lineWidth = fist ? 4 : 3;
@@ -385,6 +422,7 @@ export class Overlay {
       ctx.beginPath(); ctx.arc(c.x, c.y, 22 + vib * 16, 0, TAU);
       ctx.strokeStyle = C.amber + (0.25 + vib * 0.5) + ')'; ctx.lineWidth = 2 + vib * 3; ctx.stroke();
     }
+      if (shifted) ctx.restore();
   }
 
   rr(ctx, x, y, w, h, r) {

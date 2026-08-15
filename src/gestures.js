@@ -652,6 +652,10 @@ export class GestureEngine {
     this.handCount = hands.length;
     this.fretLm = fretH?.lm || null;
     this.pluckLm = pluckH?.lm || null;
+    // Kept only so the overlay can draw each hand where it now is rather than
+    // where it was seen; nothing in this engine reads them. See `drawLead`.
+    this.fretHand = fretH || null;
+    this.pluckHand = pluckH || null;
     return events;
   }
 }
