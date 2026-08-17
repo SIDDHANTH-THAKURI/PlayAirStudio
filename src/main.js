@@ -90,7 +90,7 @@ function rebuildBank() {
   const specs = S.chordMode === 'signs' ? S.signSpecs : S.gridSpecs;
   const force = S.voicing === 'power' ? 'power' : null;
   bank = specs.map((sp, i) => {
-    const chord = specToChord(sp, force);
+    const chord = specToChord(sp, force, S.capo);
     return { spec: sp, chord, name: chord?.name || '', glyph: SIGNS[i]?.glyph || '' };
   });
   if (S.slot >= bank.length) S.slot = 0;
@@ -245,7 +245,23 @@ function initControls() {
     S.signSpecs = defaultSignSpecs(S.key, S.style);
     rebuildBank(); persist();
   };
-  $('selKey').onchange = (e) => { S.key = +e.target.value; reseed(); };
+  /* Capo: 0–7 frets. It changes only what you hear, so unlike Key it does not
+   * reseed the bank — the chord wall keeps the same names and shapes and the
+   * whole instrument simply sounds higher, which is what a capo is for. */
+  $('selCapo').innerHTML = Array.from({ length: 8 }, (_, i) =>
+    `<option value="${i}"${i === S.capo ? ' selected' : ''}>${
+      i === 0 ? 'No capo' : `Fret ${i}`}</option>`).join('');
+  const paintCapo = () => {
+    const n = NOTE_NAMES[(S.key + S.capo) % 12];
+    $('capoNote').textContent = S.capo ? `sounds in ${n}` : 'off';
+  };
+  paintCapo();
+  $('selCapo').onchange = (e) => {
+    S.capo = +e.target.value;
+    rebuildBank(); paintCapo(); persist();
+  };
+
+  $('selKey').onchange = (e) => { S.key = +e.target.value; reseed(); paintCapo(); };
   $('selStyle').onchange = (e) => { S.style = e.target.value; reseed(); };
 
   bindSeg('segTone', (v) => { S.sound = v; guitar.ready && guitar.setSound(v); persist(); });

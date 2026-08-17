@@ -22,7 +22,7 @@ export function defaultSignPatterns() {
 /** The factory state, also the shape every loaded blob is validated against. */
 export function defaults() {
   return {
-    key: 7, style: 'pop', voicing: 'open', sound: 'acoustic', lefty: false,
+    key: 7, capo: 0, style: 'pop', voicing: 'open', sound: 'acoustic', lefty: false,
     vol: 0.8, room: 0.2, metro: false, bpm: 96,
     chordMode: 'grid', playMode: 'strum',
     gridSpecs: defaultGridSpecs(7, 'pop'),
@@ -53,6 +53,7 @@ export function load() {
 
   const num = (v, lo, hi, d) => (typeof v === 'number' && v >= lo && v <= hi ? v : d);
   S.key = num(raw.key, 0, 11, S.key);
+  S.capo = num(raw.capo, 0, 7, S.capo);
   if (typeof raw.style === 'string') S.style = raw.style;
   if (raw.voicing === 'open' || raw.voicing === 'power') S.voicing = raw.voicing;
   if (raw.sound === 'acoustic' || raw.sound === 'electric') S.sound = raw.sound;
@@ -85,7 +86,7 @@ export function save(S) {
   clearTimeout(pending);
   pending = setTimeout(() => {
     const blob = {
-      key: S.key, style: S.style, voicing: S.voicing, sound: S.sound, lefty: S.lefty,
+      key: S.key, capo: S.capo, style: S.style, voicing: S.voicing, sound: S.sound, lefty: S.lefty,
       vol: S.vol, room: S.room, metro: S.metro, bpm: S.bpm,
       chordMode: S.chordMode, playMode: S.playMode,
       gridSpecs: S.gridSpecs, signSpecs: S.signSpecs, signPatterns: S.signPatterns,

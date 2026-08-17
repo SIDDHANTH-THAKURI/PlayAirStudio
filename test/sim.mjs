@@ -58,6 +58,35 @@ console.log('\nbanks');
   ok(specToChord(null) === null, 'empty slot builds no chord');
 }
 
+/* ---- capo: changes what you hear, never what you play ---- */
+{
+  const open = buildChord(7, 'maj');          // G, no capo
+  const capo3 = buildChord(7, 'maj', 3);
+
+  ok(capo3.frets.join(',') === open.frets.join(','),
+    'a capo leaves the shape alone — same fingering', `${capo3.frets.join(' ')}`);
+  ok(capo3.name === open.name && capo3.name === 'G',
+    'and the same name, because you still finger and call it G');
+  ok(capo3.sounding === 'Bb',
+    'while reporting what it actually sounds', `G + 3 frets → ${capo3.sounding}`);
+
+  // Every sounding string moves by exactly the capo, and none is lost.
+  const shifted = open.midi.every((m, i) =>
+    (m === null) === (capo3.midi[i] === null) && (m === null || capo3.midi[i] - m === 3));
+  ok(shifted, 'every string sounds exactly three semitones higher',
+    `${open.midi.filter(Boolean).join(',')} → ${capo3.midi.filter(Boolean).join(',')}`);
+
+  // The bug that started this: changing the control had to change the sound.
+  ok(buildChord(7, 'maj', 1).midi[5] !== open.midi[5],
+    'fret 1 is audibly different from no capo');
+  ok(buildChord(7, 'maj', 0).midi.join() === open.midi.join(),
+    'and 0 is exactly the un-capoed instrument');
+  // Out-of-range values must not silently detune the guitar.
+  ok(buildChord(7, 'maj', -4).midi.join() === open.midi.join(), 'a negative capo is clamped away');
+  ok(specToChord({ root: 7, quality: 'maj' }, null, 2).midi[5] === open.midi[5] + 2,
+    'and the capo reaches the bank through specToChord');
+}
+
 /* ============ 3. patterns ============ */
 console.log('\npatterns');
 {

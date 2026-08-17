@@ -53,16 +53,35 @@ function barreVoicing(rootPc, quality) {
   return shape.map((f) => (f === null ? null : f + fret));
 }
 
-export function buildChord(rootPc, quality) {
+/**
+ * @param capo frets the capo is clamped at, 0 for none.
+ *
+ * A capo raises what you *hear* and changes nothing about what you *play*, so
+ * it is added to `midi` and to nothing else. The shape in `frets` and the name
+ * stay put deliberately: with a capo on the 1st fret you still finger a G and
+ * still call it G, it simply sounds a semitone higher — which is the whole
+ * reason to use one. Transposing the name instead would rewrite the chord wall
+ * under the player's fingers every time they moved the capo, and re-fingering
+ * the shape is exactly the work a capo exists to avoid.
+ *
+ * `midi` is the single place every voice is derived from — strums, single
+ * plucks and pattern steps all read it — so one term here moves the whole
+ * instrument and nothing downstream needs to know a capo exists.
+ */
+export function buildChord(rootPc, quality, capo = 0) {
   rootPc = mod12(rootPc);
+  const shift = Math.max(0, Math.min(12, capo | 0));
   const frets = (quality !== 'power' && OPEN_SHAPES[`${rootPc}:${quality}`])
     ? OPEN_SHAPES[`${rootPc}:${quality}`].slice()
     : barreVoicing(rootPc, quality);
   return {
     name: NOTE_NAMES[rootPc] + (SUFFIX[quality] ?? ''),
     quality,
+    capo: shift,
+    /** What the chord actually sounds, for anywhere that needs to say so. */
+    sounding: NOTE_NAMES[mod12(rootPc + shift)] + (SUFFIX[quality] ?? ''),
     frets,
-    midi: frets.map((f, i) => (f === null ? null : OPEN_STRING_MIDI[i] + f)),
+    midi: frets.map((f, i) => (f === null ? null : OPEN_STRING_MIDI[i] + f + shift)),
   };
 }
 
@@ -129,9 +148,9 @@ export function defaultSignSpecs(keyPc, styleId) {
 }
 
 /** Spec → voicing. `force` mirrors buildSet's power-chord override. */
-export function specToChord(spec, force) {
+export function specToChord(spec, force, capo = 0) {
   if (!spec) return null;
-  return buildChord(spec.root, force === 'power' ? 'power' : spec.quality);
+  return buildChord(spec.root, force === 'power' ? 'power' : spec.quality, capo);
 }
 
 /** Human name for a spec without paying for a full voicing build. */
